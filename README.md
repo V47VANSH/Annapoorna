@@ -42,6 +42,8 @@ To ensure wide coverage of crop types and disease scenarios, we curated a divers
 ### 📁 3. [PlantDoc Dataset](https://github.com/pratikkayal/PlantDoc-Dataset)
 - Realistic field images with complex backgrounds and natural lighting, ideal for generalization.
 
+### 📁 4. [Identification of Plant Leaf Diseases Using a 9-layer Deep Convolutional Neural Network](https://data.mendeley.com/datasets/tywbtsjrjv/1)  
+
 ### 🧪 Final Unified Dataset Composition
 - 🔢 **77 disease classes**
 - 🖼️ ~**1,290 images per class**
