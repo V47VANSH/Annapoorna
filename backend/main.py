@@ -2,6 +2,10 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from chatbot import returnResponse, resetConversation
+from database import register, login
+from backend.predict import predict_disease
+from backend.chatbot import image_response
+from backend.whisper_transcribe import router as whisper_router
 from database import register, login, saveTheChat
 # from predict import predict_disease
 from chatbot import image_response
@@ -71,3 +75,5 @@ async def predict(file: UploadFile = File(...)):
         }
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
+
+app.include_router(whisper_router)
