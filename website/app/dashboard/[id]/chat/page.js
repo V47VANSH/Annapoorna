@@ -9,18 +9,19 @@ export default function AnnapoornaChatbot() {
   const [input, setInput] = useState("");
   const [imagePreview, setImagePreview] = useState(null);
   const chatContainerRef = useRef(null);
+  
   const handleSend = async () => {
-  if (!input.trim() && !imagePreview) return;
+    if (!input.trim() && !imagePreview) return;
 
-  const userMessage = { type: "user", text: input.trim(), image: imagePreview };
-  setMessages((prev) => [...prev, userMessage]);
-  setInput("");
-  setImagePreview(null);
+    const userMessage = { type: "user", text: input.trim(), image: imagePreview };
+    setMessages((prev) => [...prev, userMessage]);
+    setInput("");
+    setImagePreview(null);
 
-  const botReply = await generateResponse(input.trim());
-  const botMessage = { type: "bot", text: botReply };
-  setMessages((prev) => [...prev, botMessage]);
-};
+    const botReply = await generateResponse(input.trim());
+    const botMessage = { type: "bot", text: botReply };
+    setMessages((prev) => [...prev, botMessage]);
+  };
 
   const handleNewChat = () => {
     setMessages([
