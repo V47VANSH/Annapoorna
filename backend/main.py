@@ -1,9 +1,11 @@
+from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from chatbot import returnResponse, resetConversation
 from database import register, login, saveTheChat
-# from predict import predict_disease
+from predict import predict_disease
 from chatbot import image_response
 
 app = FastAPI()

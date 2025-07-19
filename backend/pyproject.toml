@@ -14,4 +14,7 @@ dependencies = [
     "pymongo>=4.13.2",
     "scikit-learn>=1.7.1",
     "chromadb==0.4.14",
+    "pillow>=9.0.0",
+    "numpy>=1.21.0",
+    "python-multipart>=0.0.5",
 ]
