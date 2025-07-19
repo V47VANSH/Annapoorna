@@ -1,13 +1,17 @@
 "use client"
 import { useState, useEffect, useRef } from "react";
+import { useParams } from "next/navigation";
 import { Sparkles, RefreshCcw, ImageIcon } from "lucide-react";
 
 export default function AnnapoornaChatbot() {
+  const params=useParams();
+  const id=params.id;
   const [messages, setMessages] = useState([
     { type: "bot", text: "Hi, Annapoorna here! How may I help you?" },
   ]);
   const [input, setInput] = useState("");
   const [imagePreview, setImagePreview] = useState(null);
+  const [context, setContext]=useState("context");
   const chatContainerRef = useRef(null);
   
   const handleSend = async () => {
@@ -59,8 +63,17 @@ export default function AnnapoornaChatbot() {
 async function clearChat() {
   try {
     const response = await fetch("http://localhost:8000/reset", {
-      method: "POST"
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        user_id: id,
+        messages: messages,
+        context: context,
+      }),
     });
+
     const data = await response.json();
     return data.message;
   } catch (error) {
