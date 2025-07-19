@@ -70,7 +70,8 @@ export default function AnnapoornaChatbot() {
 
   async function generateResponse(userInput) {
   try {
-    const response = await fetch(`http://localhost:8000/chat/${encodeURIComponent(userInput)}`, {
+    const input = userInput || "Explain";
+    const response = await fetch(`http://localhost:8000/chat/${encodeURIComponent(input)}`, {
       method: "POST"
     });
     const data = await response.json();
