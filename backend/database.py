@@ -1,11 +1,13 @@
 from pydantic import BaseModel
 from pymongo import MongoClient
 from typing import List
+from chatbot import returnResponse
 
 
 client = MongoClient("mongodb://localhost:27017/Drona")
 db = client["Annapoorna"]
 profile_collection = db["Profiles"]
+chat_collection= db["Chats"]
 
 class UserModel(BaseModel):
     name: str
@@ -13,6 +15,12 @@ class UserModel(BaseModel):
     email: str
     phone: str
     location: List[float]
+
+class ChatModel(BaseModel):
+    user_id: str
+    name: str
+    messages: List[dict]
+    context: str
 
 def register(user: UserModel):
     existing = profile_collection.find_one({"email": user.email})
@@ -46,3 +54,15 @@ def login(data: dict):
     if not user:
         return {"error": "User not found"}
     return {"message": "Login successful", "id": str(user["_id"])}
+
+def saveTheChat(chat: ChatModel):
+    if len(chat.messages)==1:
+        return {"message": "No chat done, not saving!"}
+    name= returnResponse("Give a one line name for this chat that we did. It must be one line only and that is really necessary!!!")
+    chat_collection.insert_one({
+        "user_id":chat.user_id,
+        "name": name,
+        "messages": chat.messages,
+        "context": chat.context
+    })
+    return {"message": "Chat saved successfully", "name": name}

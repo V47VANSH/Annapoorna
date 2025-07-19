@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from chatbot import returnResponse, resetConversation
-from database import register, login
+from database import register, login, saveTheChat
 
 app = FastAPI()
 
@@ -31,7 +31,10 @@ class UserModel(BaseModel):
 class LoginModel(BaseModel):
     email: str
 
-# API ROUTES
+class ChatModel(BaseModel):
+    user_id: str
+    messages: list
+    context: str
 
 @app.post("/chat/{input}")
 def chat_with_input(input: str):
@@ -39,7 +42,8 @@ def chat_with_input(input: str):
     return {"response": response}
 
 @app.post("/reset")
-def reset_chat():
+def reset_chat(chat : ChatModel):
+    saveTheChat(chat)
     resetConversation()
     return {"message": "Conversation reset successfully"}
 
@@ -50,3 +54,5 @@ def register_user(user: UserModel):
 @app.post("/login")
 def login_user(data: LoginModel):
     return login(data.dict())
+
+    
