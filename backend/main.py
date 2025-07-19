@@ -2,7 +2,9 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from chatbot import returnResponse, resetConversation
-from database import register, login, saveTheChat
+from database import register, login
+from backend.predict import predict_disease
+from backend.chatbot import image_response
 
 app = FastAPI()
 
@@ -55,4 +57,17 @@ def register_user(user: UserModel):
 def login_user(data: LoginModel):
     return login(data.dict())
 
-    
+@app.post("/predict")
+async def predict(file: UploadFile = File(...)):
+    if not file.content_type.startswith("image/"):
+        raise HTTPException(status_code=400, detail="Uploaded file is not an image.")
+    try:
+        img_bytes = await file.read()
+        disease = predict_disease(img_bytes)
+        response_markdown = image_response(disease)
+        return {
+            "disease": disease,
+            "response": response_markdown
+        }
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})

@@ -36,16 +36,37 @@ export default function AnnapoornaChatbot() {
     clearChat();
   };
 
-  const handleImageChange = (e) => {
-    const file = e.target.files[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setImagePreview(reader.result);
-      };
-      reader.readAsDataURL(file);
+  // const handleImageChange = (e) => {
+  //   const file = e.target.files[0];
+  //   if (file) {
+  //     const reader = new FileReader();
+  //     reader.onloadend = () => {
+  //       setImagePreview(reader.result);
+  //     };
+  //     reader.readAsDataURL(file);
+  //   }
+  // };
+  const handleImageChange = async (e) => {
+  const file = e.target.files[0];
+  if (file) {
+    const formData = new FormData();
+    formData.append("file", file);
+
+    try {
+      const res = await fetch("http://localhost:8000/predict", {
+        method: "POST",
+        body: formData,
+      });
+      const data = await res.json();
+      console.log("Prediction:", data);
+      setImagePreview(URL.createObjectURL(file)); // Optional preview
+      setPrediction(data); // You can store and display this
+    } catch (err) {
+      console.error("Upload failed", err);
     }
-  };
+  }
+};
+
 
   async function generateResponse(userInput) {
   try {
