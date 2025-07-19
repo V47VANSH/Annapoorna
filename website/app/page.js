@@ -7,7 +7,6 @@ export default function LoginPage() {
   const [user, setUser] = useState({ name: "", address: "", email: "", phone: "" });
   const [isLogin, setIsLogin] = useState(false);
   const router = useRouter();
-  const [coords, setCoords] = useState([]);
 
   const handleRegister = async () => {
   if (!user.address) return alert("Please provide an address!");
@@ -32,7 +31,7 @@ export default function LoginPage() {
     });
 
     if (res.data.id) {
-      router.push(`/home?id=${res.data.id}`);
+      router.push(`/dashboard/${res.data.id}/home`);
     } else {
       alert(res.data.error || "Registration failed.");
     }
@@ -49,7 +48,7 @@ export default function LoginPage() {
         email: user.email,
       });
       if (res.data.id) {
-        router.push(`/home?id=${res.data.id}`);
+        router.push(`/dashboard/${res.data.id}/home`);
       } else {
         alert(res.data.error);
       }

@@ -18,6 +18,7 @@ PROJECT_ID = os.environ.get("PROJECT_ID")
 
 
 # Initialize GEE
+ee.Authenticate()
 ee.Initialize(project=PROJECT_ID)
 
 
@@ -872,21 +873,21 @@ def generate_multisatellite_report(geometry_geojson, user_login, utc_now):
     return llm_text_report, raw_details, flagged_coords_vals, metadata
 
 # ===== Example Usage =====
-if __name__ == '__main__':
-    user = 'YOUR_USER'
-    utc_now = '2025-07-19 11:24:00'
-    my_field =  [ [ 76.9707, 29.4292 ],  #// Southwest
-  [ 76.9780, 29.4292 ], # // Southeast
-  [ 76.9780, 29.4340 ], # // Northeast
-  [ 76.9707, 29.4340 ], # // Northwest
-  [ 76.9707, 29.4292 ]  # // Closing point
-]
-    text_report, details, flagged, meta = generate_multisatellite_report(my_field, user, utc_now)
-    print('--- LLM Text Report ---')
-    print(text_report)
-    print('\n--- Raw Details ---')
-    print(json.dumps(details, indent=4))
-    print('\n--- Flagged Areas Sample (max 10) ---')
-    print(flagged[:10])
-    print('\n--- Metadata ---')
-    print(json.dumps(meta, indent=4))
+# if __name__ == '__main__':
+#     user = 'YOUR_USER'
+#     utc_now = '2025-07-19 11:24:00'
+#     my_field =  [ [ 76.9707, 29.4292 ],  #// Southwest
+#   [ 76.9780, 29.4292 ], # // Southeast
+#   [ 76.9780, 29.4340 ], # // Northeast
+#   [ 76.9707, 29.4340 ], # // Northwest
+#   [ 76.9707, 29.4292 ]  # // Closing point
+# ]
+#     text_report, details, flagged, meta = generate_multisatellite_report(my_field, user, utc_now)
+#     print('--- LLM Text Report ---')
+#     print(text_report)
+    # print('\n--- Raw Details ---')
+    # print(json.dumps(details, indent=4))
+    # print('\n--- Flagged Areas Sample (max 10) ---')
+    # print(flagged[:10])
+    # print('\n--- Metadata ---')
+    # print(json.dumps(meta, indent=4))
