@@ -1,7 +1,7 @@
 "use client"
 import { useState, useEffect, useRef } from "react";
 import { useParams } from "next/navigation";
-import { Sparkles, RefreshCcw, ImageIcon } from "lucide-react";
+import { Sparkles, RefreshCcw, ImageIcon, Mic, Square } from "lucide-react";
 
 export default function AnnapoornaChatbot() {
   const params=useParams();
@@ -12,6 +12,9 @@ export default function AnnapoornaChatbot() {
   const [input, setInput] = useState("");
   const [imagePreview, setImagePreview] = useState(null);
   const [context, setContext]=useState("context");
+  const [isRecording, setIsRecording] = useState(false);
+  const [mediaRecorder, setMediaRecorder] = useState(null);
+  const [audioBlob, setAudioBlob] = useState(null);
   const chatContainerRef = useRef(null);
   
   const handleSend = async () => {
@@ -105,6 +108,60 @@ async function clearChat() {
 }
 
 
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream);
+      const chunks = [];
+
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) {
+          chunks.push(e.data);
+        }
+      };
+
+      recorder.onstop = () => {
+        const blob = new Blob(chunks, { type: 'audio/wav' });
+        setAudioBlob(blob);
+        transcribeAudio(blob);
+        stream.getTracks().forEach(track => track.stop());
+      };
+
+      recorder.start();
+      setMediaRecorder(recorder);
+      setIsRecording(true);
+    } catch (err) {
+      console.error('Error accessing microphone:', err);
+      alert('Error accessing microphone. Please check permissions.');
+    }
+  };
+
+  const stopRecording = () => {
+    if (mediaRecorder && isRecording) {
+      mediaRecorder.stop();
+      setIsRecording(false);
+    }
+  };
+
+  const transcribeAudio = async (audioBlob) => {
+    try {
+      const formData = new FormData();
+      formData.append('file', audioBlob, 'recording.wav');
+
+      const response = await fetch('http://localhost:8000/transcribe', {
+        method: 'POST',
+        body: formData,
+      });
+
+      const data = await response.json();
+      if (data.transcription) {
+        setInput(data.transcription);
+      }
+    } catch (error) {
+      console.error('Transcription error:', error);
+    }
+  };
+
   useEffect(() => {
     if (chatContainerRef.current) {
       chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
@@ -159,6 +216,15 @@ async function clearChat() {
               >
                 <ImageIcon className="w-6 h-6" />
               </label>
+              
+              <button
+                onClick={isRecording ? stopRecording : startRecording}
+                className={`cursor-pointer ${isRecording ? 'text-red-600 animate-pulse' : 'text-green-700 hover:text-green-900'}`}
+                title={isRecording ? "Stop recording" : "Start voice recording"}
+              >
+                {isRecording ? <Square className="w-6 h-6" /> : <Mic className="w-6 h-6" />}
+              </button>
+
               <input
                 type="text"
                 placeholder="Type your message..."
@@ -176,6 +242,9 @@ async function clearChat() {
             </div>
             {imagePreview && (
               <div className="mt-2 text-sm text-green-800">Image ready to send ✅</div>
+            )}
+            {isRecording && (
+              <div className="mt-2 text-sm text-red-600 animate-pulse">🔴 Recording... Click stop when done</div>
             )}
           </div>
         </div>
