@@ -5,9 +5,9 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from chatbot import returnResponse, resetConversation
 from database import register, login
-from backend.predict import predict_disease
-from backend.chatbot import image_response
-from backend.whisper_transcribe import router as whisper_router
+from predict import predict_disease
+from chatbot import image_response
+from whisper_transcribe import router as whisper_router
 from database import register, login, saveTheChat
 from predict import predict_disease
 from chatbot import image_response

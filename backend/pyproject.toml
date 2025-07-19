@@ -17,4 +17,5 @@ dependencies = [
     "pillow>=9.0.0",
     "numpy>=1.21.0",
     "python-multipart>=0.0.5",
+    "openai-whisper>=20250625",
 ]
