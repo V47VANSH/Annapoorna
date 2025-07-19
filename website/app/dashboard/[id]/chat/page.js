@@ -2,8 +2,20 @@
 import { useState, useEffect, useRef } from "react";
 import { useParams } from "next/navigation";
 import { Sparkles, RefreshCcw, ImageIcon, Mic, Square } from "lucide-react";
-
+import ChatSidebar from "@/components/ChatSideBar";
 export default function AnnapoornaChatbot() {
+const dummyChats = [
+  { id: "1", name: "Customer Support" },
+  { id: "2", name: "Project Ideas" },
+  { id: "3", name: "NeuroVox Logs" },
+];
+const handleChatClick = (chatId) => {
+    console.log("Chat clicked:", chatId);
+    // You can load messages or redirect here
+  };
+
+const [activeChatId, setActiveChatId] = useState("1"); // Default or selected chat
+
   const params=useParams();
   const id=params.id;
   const [messages, setMessages] = useState([
@@ -39,16 +51,6 @@ export default function AnnapoornaChatbot() {
     clearChat();
   };
 
-  // const handleImageChange = (e) => {
-  //   const file = e.target.files[0];
-  //   if (file) {
-  //     const reader = new FileReader();
-  //     reader.onloadend = () => {
-  //       setImagePreview(reader.result);
-  //     };
-  //     reader.readAsDataURL(file);
-  //   }
-  // };
   const handleImageChange = async (e) => {
   const file = e.target.files[0];
   if (file) {
@@ -169,7 +171,11 @@ async function clearChat() {
   }, [messages]);
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-green-100 via-yellow-50 to-green-200 flex flex-col items-center p-6">
+    <div className="flex">
+     <div className="flex">
+      <ChatSidebar chats={dummyChats} onChatClick={handleChatClick} />
+    </div>
+    <div className="w-full min-h-screen bg-gradient-to-br from-green-100 via-yellow-50 to-green-200 flex flex-col items-center p-6">
       <div className="max-w-2xl w-full">
         <div className="flex justify-between items-center mb-4">
           <h1 className="text-3xl font-bold text-green-800 flex items-center gap-2">
@@ -249,6 +255,7 @@ async function clearChat() {
           </div>
         </div>
       </div>
+    </div>
     </div>
   );
 }
