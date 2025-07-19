@@ -46,6 +46,7 @@ class ChatModel(BaseModel):
 
 @app.post("/chat/{input}")
 def chat_with_input(input: str):
+    print(f"Received input: {input}")
     response = returnResponse(input)
     return {"response": response}
 

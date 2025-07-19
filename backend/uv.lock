@@ -39,6 +39,7 @@ dependencies = [
     { name = "dotenv" },
     { name = "earthengine-api" },
     { name = "fastapi" },
+    { name = "ffmpeg" },
     { name = "langchain" },
     { name = "langchain-ollama" },
     { name = "langchain-openai" },
@@ -56,6 +57,7 @@ requires-dist = [
     { name = "dotenv", specifier = ">=0.9.9" },
     { name = "earthengine-api", specifier = ">=1.5.24" },
     { name = "fastapi", specifier = ">=0.116.1" },
+    { name = "ffmpeg", specifier = ">=1.4" },
     { name = "langchain", specifier = ">=0.3.26" },
     { name = "langchain-ollama", specifier = ">=0.3.4" },
     { name = "langchain-openai", specifier = ">=0.3.28" },
@@ -378,6 +380,12 @@ sdist = { url = "https://files.pythonhosted.org/packages/78/d7/6c8b3bfe33eeffa20
 wheels = [
     { url = "https://files.pythonhosted.org/packages/e5/47/d63c60f59a59467fda0f93f46335c9d18526d7071f025cb5b89d5353ea42/fastapi-0.116.1-py3-none-any.whl", hash = "sha256:c46ac7c312df840f0c9e220f7964bada936781bc4e2e6eb71f1c4d7553786565", size = 95631, upload-time = "2025-07-11T16:22:30.485Z" },
 ]
+
+[[package]]
+name = "ffmpeg"
+version = "1.4"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/f0/cc/3b7408b8ecf7c1d20ad480c3eaed7619857bf1054b690226e906fdf14258/ffmpeg-1.4.tar.gz", hash = "sha256:6931692c890ff21d39938433c2189747815dca0c60ddc7f9bb97f199dba0b5b9", size = 5055, upload-time = "2018-10-08T07:50:05.748Z" }
 
 [[package]]
 name = "filelock"
