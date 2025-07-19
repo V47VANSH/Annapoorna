@@ -1,0 +1,48 @@
+from pydantic import BaseModel
+from pymongo import MongoClient
+from typing import List
+
+
+client = MongoClient("mongodb://localhost:27017/Drona")
+db = client["Annapoorna"]
+profile_collection = db["Profiles"]
+
+class UserModel(BaseModel):
+    name: str
+    address: str
+    email: str
+    phone: str
+    location: List[float]
+
+def register(user: UserModel):
+    existing = profile_collection.find_one({"email": user.email})
+    if existing:
+        return {"error": "User already exists."}
+
+    # Validate bounding box length (optional but good practice)
+    if not isinstance(user.location, list) or len(user.location) != 4:
+        return {"error": "Invalid location data. Expected bounding box with 4 values."}
+
+    result = profile_collection.insert_one({
+        "name": user.name,
+        "address": user.address,
+        "email": user.email,
+        "phone": user.phone,
+        "bounding_box": user.location,  # ✅ renamed for clarity
+        "collection_name": ""
+    })
+
+    collection_name = str(result.inserted_id)
+    profile_collection.update_one(
+        {"_id": result.inserted_id},
+        {"$set": {"collection_name": collection_name + "collection"}}
+    )
+
+    return {"message": "User registered", "id": collection_name}
+
+
+def login(data: dict):
+    user = profile_collection.find_one({"email": data["email"]})
+    if not user:
+        return {"error": "User not found"}
+    return {"message": "Login successful", "id": str(user["_id"])}
