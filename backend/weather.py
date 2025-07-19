@@ -56,7 +56,7 @@ def fetch_tomorrow_io(lat, lon):
 def get_weather_info(lat, lon) -> str:
     tomorrow = fetch_tomorrow_io(lat, lon)
 
-    report = f"\n🌾 Combined Weather Insights for Location ({lat}, {lon}):\n"
+    report = f"\nCombined Weather Insights for the field location are following:\n"
 
     if "error" not in tomorrow:
         report += f"""
@@ -64,8 +64,8 @@ def get_weather_info(lat, lon) -> str:
 - Temp: {tomorrow['temperature']}°C
 - Humidity: {tomorrow['humidity']}%
 - Rain Probability: {tomorrow['rain_probability']}%
-- Soil Moisture: {tomorrow['soil_moisture']} m³/m³
-- Evapotranspiration: {tomorrow['evapotranspiration']} mm/day"""
+{"- Soil Moisture: "+tomorrow['soil_moisture']+" m³/m³" if tomorrow['soil_moisture']!="N/A" else ""}
+{"- Evapotranspiration: "+tomorrow['evapotranspiration']+" mm/day" if tomorrow['evapotranspiration']!="N/A" else ""}"""
 
     # Add any API errors
     for api_response in [tomorrow]:
@@ -73,5 +73,3 @@ def get_weather_info(lat, lon) -> str:
             report += f"\n\n⚠️ {api_response['error']}"
 
     return report
-
-print(get_weather_info(30.7333,76.7794))
