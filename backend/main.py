@@ -8,7 +8,7 @@ from typing import Dict
 from uuid import uuid4
 from datetime import datetime
 from chatbot import returnResponse, resetConversation, image_response, addContext
-from database import register, login, saveTheChat, saveReport, get_user_id_and_bounding_box, get_email_by_id, get_latest_report_by_user_id, get_all_reports
+from database import register, login, saveTheChat, saveReport, get_user_id_and_bounding_box, get_email_by_id, get_latest_report_by_user_id, get_all_reports, get_chats_by_user_id
 from predict import predict_disease
 from whisper_transcribe import router as whisper_router
 from generateReport import generateReport
@@ -153,5 +153,9 @@ def get_all(id: str):
 @app.get("/latestReport/{user_id}")
 def get_latest(user_id: str):
     return get_latest_report_by_user_id(user_id)
+
+@app.get("/allChats/{id}")
+def allChats(id: str):
+    return get_chats_by_user_id(id)
 
 app.include_router(whisper_router)

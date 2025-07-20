@@ -128,3 +128,13 @@ def get_all_reports(user_id: str):
     cursor = report_collection.find({"user_id": user_id}).sort("date", -1)
     reports = list(cursor)
     return json.loads(dumps(reports))
+
+def get_chats_by_user_id(user_id: str):
+    try:
+        chats = list(chat_collection.find({"user_id": user_id}))
+        for chat in chats:
+            chat["_id"] = str(chat["_id"])  # Convert ObjectId to string
+        return chats
+    except Exception as e:
+        print(f"Error fetching chats for user {user_id}: {e}")
+        return []
