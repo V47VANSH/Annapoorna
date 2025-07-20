@@ -4,6 +4,7 @@ import axios from 'axios';
 import { useParams } from "next/navigation";
 import { Sparkles, RefreshCcw, ImageIcon, Mic, Square } from "lucide-react";
 import ChatSidebar from "@/components/ChatSideBar";
+import ReactMarkdown from "react-markdown";
 export default function AnnapoornaChatbot() {
 
 const handleChatClick = (chatId) => {
@@ -26,6 +27,8 @@ const [activeChatId, setActiveChatId] = useState(null); // No default // Default
   const [mediaRecorder, setMediaRecorder] = useState(null);
   const [audioBlob, setAudioBlob] = useState(null);
   const chatContainerRef = useRef(null);
+  const [isUploadingImage, setIsUploadingImage] = useState(false);
+  const [isTranscribingAudio, setIsTranscribingAudio] = useState(false);
   
   useEffect(() => {
   if (!id) return;
@@ -121,6 +124,7 @@ const changeChat = async (chat_id) => {
   const handleImageChange = async (e) => {
   const file = e.target.files[0];
   if (file) {
+    setIsUploadingImage(true);
     const formData = new FormData();
     formData.append("file", file);
 
@@ -131,13 +135,16 @@ const changeChat = async (chat_id) => {
       });
       const data = await res.json();
       console.log("Prediction:", data);
-      setImagePreview(URL.createObjectURL(file)); // Optional preview
-      setPrediction(data); // You can store and display this
+      setImagePreview(URL.createObjectURL(file));
+      setPrediction(data);
     } catch (err) {
       console.error("Upload failed", err);
+    } finally {
+      setIsUploadingImage(false);
     }
   }
 };
+
 
 
 
@@ -214,23 +221,27 @@ async function clearChat() {
   };
 
   const transcribeAudio = async (audioBlob) => {
-    try {
-      const formData = new FormData();
-      formData.append('file', audioBlob, 'recording.wav');
+  setIsTranscribingAudio(true);
+  try {
+    const formData = new FormData();
+    formData.append('file', audioBlob, 'recording.wav');
 
-      const response = await fetch('http://localhost:8000/transcribe', {
-        method: 'POST',
-        body: formData,
-      });
+    const response = await fetch('http://localhost:8000/transcribe', {
+      method: 'POST',
+      body: formData,
+    });
 
-      const data = await response.json();
-      if (data.transcription) {
-        setInput(data.transcription);
-      }
-    } catch (error) {
-      console.error('Transcription error:', error);
+    const data = await response.json();
+    if (data.transcription) {
+      setInput(data.transcription);
     }
-  };
+  } catch (error) {
+    console.error('Transcription error:', error);
+  } finally {
+    setIsTranscribingAudio(false);
+  }
+};
+
 
   useEffect(() => {
     if (chatContainerRef.current) {
@@ -276,7 +287,7 @@ async function clearChat() {
                   style={{ wordBreak: 'break-word', overflowWrap: 'break-word' }}
                 >
                   {msg.image && <img src={msg.image} alt="uploaded" className="mb-2 max-w-full rounded-lg" />}
-                  {msg.text}
+                  <ReactMarkdown>{msg.text}</ReactMarkdown>
                 </div>
               ))}
             </div>
@@ -322,9 +333,15 @@ async function clearChat() {
             {imagePreview && (
               <div className="mt-2 text-sm text-green-800">Image ready to send ✅</div>
             )}
+            {isUploadingImage && (
+              <div className="mt-2 text-sm text-blue-600 animate-pulse">🖼️ Uploading image...</div>
+            )}
             {isRecording && (
               <div className="mt-2 text-sm text-red-600 animate-pulse">🔴 Recording... Click stop when done</div>
             )}
+            {isTranscribingAudio && (
+            <div className="mt-2 text-sm text-yellow-600 animate-pulse">🎤 Transcribing audio...</div>
+          )}
           </div>
         </div>
       </div>
