@@ -136,5 +136,9 @@ async def predict(file: UploadFile = File(...)):
 def get_all(id: str):
     return {"reports": get_all_reports(id)}
 
+@app.get("/latestReport/{user_id}")
+def get_latest(user_id: str):
+    return get_latest_report_by_user_id(user_id)
+
 
 app.include_router(whisper_router)
