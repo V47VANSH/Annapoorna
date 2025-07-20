@@ -5,17 +5,14 @@ import { useParams } from "next/navigation";
 import { Sparkles, RefreshCcw, ImageIcon, Mic, Square } from "lucide-react";
 import ChatSidebar from "@/components/ChatSideBar";
 export default function AnnapoornaChatbot() {
-const dummyChats = [
-  { id: "1", name: "Customer Support" },
-  { id: "2", name: "Project Ideas" },
-  { id: "3", name: "NeuroVox Logs" },
-];
+
 const handleChatClick = (chatId) => {
     console.log("Chat clicked:", chatId);
     // You can load messages or redirect here
   };
 
-const [activeChatId, setActiveChatId] = useState("1"); // Default or selected chat
+const [chats, setChats] = useState([]);
+const [activeChatId, setActiveChatId] = useState(null); // No default // Default or selected chat
 
   const params=useParams();
   const id=params.id;
@@ -30,6 +27,41 @@ const [activeChatId, setActiveChatId] = useState("1"); // Default or selected ch
   const [audioBlob, setAudioBlob] = useState(null);
   const chatContainerRef = useRef(null);
   
+  useEffect(() => {
+  if (!id) return;
+
+  const fetchChats = async () => {
+    try {
+      const response = await axios.get(`http://localhost:8000/allChats/${id}`);
+      if (Array.isArray(response.data)) {
+        setChats(response.data);
+        if (response.data.length > 0) {
+          setActiveChatId(response.data[0]._id.$oid); // default to first chat
+        }
+      }
+    } catch (error) {
+      console.error("Failed to fetch chats:", error);
+    }
+  };
+
+  fetchChats();
+}, [id]);
+
+  const changeChat = async (chat_id) => {
+  const chat = chats.find(chat => String(chat._id).trim() === String(chat_id).trim());
+  
+  if (!chat) {
+    console.warn("Chat not found for ID:", chat_id);
+    setMessages([]); // fallback to empty
+    return;
+  }
+
+  setMessages(chat.messages);
+  setContext(chat.context);
+  
+  setActiveChatId(chat_id);
+};
+
   const handleSend = async () => {
     if (!input.trim() && !imagePreview) return;
 
@@ -196,7 +228,12 @@ async function clearChat() {
   return (
     <div className="flex">
      <div className="flex">
-      <ChatSidebar chats={dummyChats} onChatClick={handleChatClick} />
+      <ChatSidebar
+        chats={chats}
+        activeChatId={activeChatId}
+        onSelectChat={changeChat}
+      />
+
     </div>
     <div className="w-full min-h-screen bg-gradient-to-br from-green-100 via-yellow-50 to-green-200 flex flex-col items-center p-6">
       <div className="max-w-2xl w-full">

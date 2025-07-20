@@ -10,10 +10,10 @@ export default function ChatSidebar({ chats, activeChatId, onSelectChat }) {
       <div className="flex-1 overflow-y-auto space-y-1 p-2">
         {chats.map((chat) => (
           <button
-            key={chat.id}
-            onClick={() => onSelectChat(chat.id)}
+            key={chat._id}
+            onClick={() => onSelectChat(chat._id)}
             className={`w-full text-left px-4 py-2 rounded-lg hover:bg-green-700 transition ${
-              chat.id === activeChatId ? "bg-green-600 font-semibold" : "bg-green-900"
+              chat._id === activeChatId ? "bg-green-600 font-semibold" : "bg-green-900"
             }`}
           >
             {chat.name}

@@ -138,3 +138,14 @@ def get_chats_by_user_id(user_id: str):
     except Exception as e:
         print(f"Error fetching chats for user {user_id}: {e}")
         return []
+    
+def get_chat_by_id(chat_id: str):
+    try:
+        chat = chat_collection.find_one({"_id": ObjectId(chat_id)})
+        if not chat:
+            return None
+        chat["_id"] = str(chat["_id"])  # Convert ObjectId to string
+        return chat
+    except Exception as e:
+        print(f"Error fetching chat by ID {chat_id}: {e}")
+        return None

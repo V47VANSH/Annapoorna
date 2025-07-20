@@ -8,7 +8,7 @@ from typing import Dict
 from uuid import uuid4
 from datetime import datetime
 from chatbot import returnResponse, resetConversation, image_response, addContext
-from database import register, login, saveTheChat, saveReport, get_user_id_and_bounding_box, get_email_by_id, get_latest_report_by_user_id, get_all_reports, get_chats_by_user_id,profile_collection
+from database import register, login, saveTheChat, saveReport, get_user_id_and_bounding_box, get_email_by_id, get_latest_report_by_user_id, get_all_reports, get_chats_by_user_id, profile_collection, get_chat_by_id
 from predict import predict_disease
 from whisper_transcribe import router as whisper_router
 from generateReport import generateReport
@@ -178,8 +178,12 @@ def get_user_profile(user_id: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-
-
+@app.get("/chatById/{chat_id}")
+def get_chat_by_id_route(chat_id: str):
+    chat = get_chat_by_id(chat_id)
+    if chat:
+        return chat
+    raise HTTPException(status_code=404, detail="Chat not found")
 
 
 

@@ -19,7 +19,7 @@ export default function Layout({ children }) {
             </div>
             <div className="hidden md:block">
               <div className="ml-10 flex items-center space-x-8">
-                {['Home','Profile', 'Reports', 'Expert Advice', 'Chat'].map((item) => (
+                {['Home','Profile', 'Reports', 'Chat'].map((item) => (
                   <a 
                     key={item}
                     href={`/dashboard/${id}/${item.toLowerCase().split(" ")[0]}`}
