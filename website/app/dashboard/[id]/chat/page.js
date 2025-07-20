@@ -47,20 +47,33 @@ const [activeChatId, setActiveChatId] = useState(null); // No default // Default
   fetchChats();
 }, [id]);
 
-  const changeChat = async (chat_id) => {
+const changeChat = async (chat_id) => {
   const chat = chats.find(chat => String(chat._id).trim() === String(chat_id).trim());
-  
+
   if (!chat) {
     console.warn("Chat not found for ID:", chat_id);
-    setMessages([]); // fallback to empty
+    setMessages([]);
     return;
   }
 
   setMessages(chat.messages);
   setContext(chat.context);
-  
   setActiveChatId(chat_id);
+
+  try {
+    const response = await fetch("http://localhost:8000/setContext", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ context: chat.context }),
+    });
+  } catch (error) {
+    console.error("Error:", error);
+    return "Sorry, something went wrong.";
+  }
 };
+
 
   const handleSend = async () => {
     if (!input.trim() && !imagePreview) return;

@@ -55,6 +55,9 @@ class Reports(BaseModel):
     user_id: str
     date: datetime
 
+class ChatContext(BaseModel):
+    context: str
+
 # Periodic task function
 def periodic_task(email: str):
     print(f"Starting report generation for user of email ${email}")
@@ -185,6 +188,9 @@ def get_chat_by_id_route(chat_id: str):
         return chat
     raise HTTPException(status_code=404, detail="Chat not found")
 
-
-
-
+@app.post("/setContext")
+def setContext(data: ChatContext):
+    context = data.context
+    # Process the context
+    addContext(context)
+    return {"response": f"Processed context with length {len(context)}"}
