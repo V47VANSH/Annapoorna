@@ -18,7 +18,7 @@ PROJECT_ID = os.environ.get("PROJECT_ID")
 
 
 # Initialize GEE
-ee.Authenticate()
+# ee.Authenticate()
 ee.Initialize(project=PROJECT_ID)
 
 
@@ -724,26 +724,40 @@ def get_field_issue_flags(stats, bands, thresholds):
     return flags
 
 def generate_flagged_areas(image, geometry, bands, thresholds, scale=10):
-    flagged_pixels = []
-    if not image:
-        return flagged_pixels
+    try:
+        flagged_pixels = []
+        message = "No flagged pixels found. Everything is within healthy thresholds."
+        if not image:
+            return flagged_pixels
 
-    for param, th in zip(bands, thresholds):
-        threshold_val = th[1]
-        band_img = image.select(param)
-        mask = band_img.lt(threshold_val)
-        masked_img = band_img.updateMask(mask)
-        samples = masked_img.sample(region=geometry, scale=scale, geometries=True).getInfo()
-        for feature in samples.get('features', []):
-            coords = feature['geometry']['coordinates']
-            props = feature['properties']
-            flagged_pixels.append({
-                'parameter': param,
-                'threshold_message': th[2],
-                'value': props.get(param),
-                'coordinates': coords
-            })
-    return flagged_pixels
+        for param, th in zip(bands, thresholds):
+            band_names = image.bandNames().getInfo()
+            if param not in band_names:
+                continue
+            threshold_val = th[1]
+            band_img = image.select(param)
+            mask = band_img.lt(threshold_val)
+            masked_img = band_img.updateMask(mask)
+            if not masked_img:
+                return flagged_pixels.append({"message": message})
+            samples = masked_img.sample(region=geometry, scale=scale, geometries=True).getInfo()
+            for feature in samples.get('features', []):
+                coords = feature['geometry']['coordinates']
+                props = feature['properties']
+                flagged_pixels.append({
+                    'message': "flagged aread detected",
+                    'parameter': param,
+                    'threshold_message': th[2],
+                    'value': props.get(param),
+                    'coordinates': coords
+                })
+        return flagged_pixels
+    except Exception as e:
+        print(f"Error generating flagged areas: {e}")
+        flagged_pixels = []
+        message = "No flagged pixels found. Everything is within healthy thresholds."
+        return flagged_pixels.append({"message": message})
+        
 
 def generate_multisatellite_report(geometry_geojson, user_login, utc_now):
     geometry = ee.Geometry.Polygon(geometry_geojson)
@@ -759,6 +773,7 @@ def generate_multisatellite_report(geometry_geojson, user_login, utc_now):
         cloud_filter=ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 15),
         bands=INDEX_BANDS['Sentinel-2'], proc_func=add_indices_s2, scale=10
     )
+    # print(f"Sentinel-2 stats")
     
     # ---- Landsat-8
     l8, l8_date, l8_stats = get_latest(
@@ -791,6 +806,7 @@ def generate_multisatellite_report(geometry_geojson, user_login, utc_now):
         cloud_filter=ee.Filter.eq('instrumentMode', 'IW'),
         bands=INDEX_BANDS['Sentinel-1'], proc_func=add_sar_indices, scale=10
     )
+    # print (f"Sentinel-1 stats")
 
     llm_text_report = f"""
 # Comprehensive Multi-Satellite Crop & Field Health Report
@@ -827,22 +843,37 @@ def generate_multisatellite_report(geometry_geojson, user_login, utc_now):
         (None, 0.1, "NDWI low: water deficit"),
     ])
 
-    flagged_areas = []
-    flagged_areas.extend(s2_flagged)
-    flagged_areas.extend(l8_flagged)
+    try:
 
-    flagged_coords_vals = []
-    flagged_coords_vals.extend(generate_flagged_areas(s2, geometry, ['NDVI', 'NDWI', 'NDRE'], [
-        (None, 0.2, "NDVI low: possible sparse or stressed vegetation"),
-        (None, 0.1, "NDWI low: likely dry/drought stress"),
-        (None, 0.1, "NDRE low: potential N deficiency"),
-    ], scale=10)[:10])
 
-    flagged_coords_vals.extend(generate_flagged_areas(l8, geometry, ['NDVI', 'NDWI'], [
-        (None, 0.2, "NDVI low: sparse or failed zones"),
-        (None, 0.1, "NDWI low: water deficit"),
-    ], scale=30)[:10])
+        flagged_areas = []
+        flagged_areas.extend(s2_flagged)
+        flagged_areas.extend(l8_flagged)
 
+        flagged_coords_vals = []
+        flagged_coords_vals.extend(generate_flagged_areas(s2, geometry, ['NDVI', 'NDWI', 'NDRE'], [
+            (None, 0.2, "NDVI low: possible sparse or stressed vegetation"),
+            (None, 0.1, "NDWI low: likely dry/drought stress"),
+            (None, 0.1, "NDRE low: potential N deficiency"),
+        ], scale=10)[:10])
+
+        if l8 is not None:
+            flagged_coords_vals.extend(generate_flagged_areas(l8, geometry, ['NDVI', 'NDWI'], [
+                (None, 0.2, "NDVI low: sparse or failed zones"),
+                (None, 0.1, "NDWI low: water deficit"),
+            ], scale=30)[:10])
+
+        if (flagged_coords_vals[0].get("message") == "No flagged pixels found. Everything is within healthy thresholds."):
+            interpretation = flagged_coords_vals[0]["message"]
+        else:
+            interpretation = generate_flagged_area_interpretation(flagged_coords_vals)
+        # llm_text_report += "\n" + interpretation + "\n"
+    except Exception as e:
+        print(f"Error generating flagged areas: {e}")
+        # llm_text_report += "\nError generating flagged areas: " + str(e) + "\n"
+        interpretation = "No flagged areas found "
+        flagged_coords_vals = []
+    llm_text_report += "\n" + interpretation + "\n"
     
 
     metadata = {
@@ -858,8 +889,8 @@ def generate_multisatellite_report(geometry_geojson, user_login, utc_now):
             'MODIS LST': modis_temp_date
         }
     }
-    interpretation = generate_flagged_area_interpretation(flagged_coords_vals)
-    llm_text_report += "\n" + interpretation + "\n"
+    # interpretation = generate_flagged_area_interpretation(flagged_coords_vals)
+    
 
     raw_details = {
         'sentinel2': {'stats': s2_stats, 'date': s2_date},

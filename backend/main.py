@@ -12,6 +12,7 @@ from database import register, login, saveTheChat, saveReport, get_user_id_and_b
 from predict import predict_disease
 from whisper_transcribe import router as whisper_router
 from generateReport import generateReport
+import threading
 
 app = FastAPI()
 
@@ -74,20 +75,29 @@ def register_user(user: UserModel):
 
 @app.post("/login")
 def login_user(data: LoginModel):
+    print(f"Login attempt for email: {data.email}")
     email = data.email
     if email in user_jobs:
+        print(f"User {email} already logged in, skipping task scheduling.")
         return {"message": "User already logged in and task is running."}
-    
+    print(f"Scheduling periodic task for user: {email}")
     job_id = str(uuid4())
     scheduler.add_job(
         periodic_task,
-        "interval",
-        days=1,
+        "cron",
+        hour=5,
+        minute=0,
         args=[email],
         id=job_id,
         replace_existing=True
     )
+    # periodic_task(email)  # Run immediately for the first time
+
+    print(f"Scheduled job ID {job_id} for user {email}")
     user_jobs[email] = job_id
+    print(f"User {email} logged in successfully.")
+
+    threading.Thread(target=periodic_task, args=(email,), daemon=True).start()
 
     return login(data.dict())
 
