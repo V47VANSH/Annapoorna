@@ -2,13 +2,18 @@ from pydantic import BaseModel
 from pymongo import MongoClient
 from typing import List
 from chatbot import returnResponse
+from datetime import datetime
+from fastapi import HTTPException
+from bson.json_util import dumps
+import json 
+
 
 
 client = MongoClient("mongodb://localhost:27017/Drona")
 db = client["Annapoorna"]
 profile_collection = db["Profiles"]
 chat_collection= db["Chats"]
-
+report_collection=db["Reports"]
 class UserModel(BaseModel):
     name: str
     address: str
@@ -21,6 +26,11 @@ class ChatModel(BaseModel):
     name: str
     messages: List[dict]
     context: str
+
+class ReportModel(BaseModel):
+    user_id: str
+    date : datetime
+    report : str
 
 def register(user: UserModel):
     existing = profile_collection.find_one({"email": user.email})
@@ -66,3 +76,54 @@ def saveTheChat(chat: ChatModel):
         "context": chat.context
     })
     return {"message": "Chat saved successfully", "name": name}
+
+def saveReport(user_id: str, report: str):
+    now=datetime.now()
+    report_collection.insert_one({
+        "user_id": user_id,
+        "date": now,
+        "report" : report
+    })
+
+def get_user_id_and_bounding_box(email: str):
+    user = profile_collection.find_one({"email": email}, {"_id": 1, "bounding_box": 1})
+    if not user:
+        return None  # or raise an exception if preferred
+    
+    return {
+        "id": str(user["_id"]),
+        "bounding_box": user.get("bounding_box")
+    }
+
+def get_email_by_id(user_id: str):
+    try:
+        user = profile_collection.find_one({"_id": ObjectId(user_id)}, {"email": 1})
+        if user:
+            return user.get("email")
+        else:
+            return None
+    except Exception as e:
+        print(f"Error fetching email for ID {user_id}: {e}")
+        return None
+    
+def get_latest_report_by_user_id(user_id: str):
+    try:
+        latest_report = report_collection.find_one(
+            {"user_id": user_id},
+            sort=[("date", -1)]  # Sort by date descending
+        )
+        if latest_report:
+            return {
+                "date": latest_report["date"],
+                "report": latest_report["report"]
+            }
+        else:
+            return None
+    except Exception as e:
+        print(f"Error fetching latest report for user {user_id}: {e}")
+        return None
+    
+def get_all_reports(user_id: str):
+    cursor = report_collection.find({"user_id": user_id}).sort("date", -1)
+    reports = list(cursor)
+    return json.loads(dumps(reports))

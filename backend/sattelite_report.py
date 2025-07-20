@@ -870,7 +870,7 @@ def generate_multisatellite_report(geometry_geojson, user_login, utc_now):
         'modis_lst': {'stats': modis_temp_stats, 'date': modis_temp_date}
     }
 
-    return llm_text_report, raw_details, flagged_coords_vals, metadata
+    return [llm_text_report, raw_details, flagged_coords_vals, metadata]
 
 # ===== Example Usage =====
 # if __name__ == '__main__':

@@ -8,7 +8,7 @@ import shutil
 router = APIRouter()
 model = whisper.load_model("medium")
 
-os.makedirs("backend/transcriptions", exist_ok=True)
+os.makedirs("transcriptions", exist_ok=True)
 
 @router.post("/transcribe/")
 async def transcribe_audio(file: UploadFile = File(...)):
