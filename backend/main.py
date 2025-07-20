@@ -8,11 +8,12 @@ from typing import Dict
 from uuid import uuid4
 from datetime import datetime
 from chatbot import returnResponse, resetConversation, image_response, addContext
-from database import register, login, saveTheChat, saveReport, get_user_id_and_bounding_box, get_email_by_id, get_latest_report_by_user_id, get_all_reports, get_chats_by_user_id
+from database import register, login, saveTheChat, saveReport, get_user_id_and_bounding_box, get_email_by_id, get_latest_report_by_user_id, get_all_reports, get_chats_by_user_id,profile_collection
 from predict import predict_disease
 from whisper_transcribe import router as whisper_router
 from generateReport import generateReport
 import threading
+from bson import ObjectId
 
 app = FastAPI()
 
@@ -159,3 +160,27 @@ def allChats(id: str):
     return get_chats_by_user_id(id)
 
 app.include_router(whisper_router)
+
+@app.get("/profile/{user_id}")
+def get_user_profile(user_id: str):
+    try:
+        user = profile_collection.find_one({"_id": ObjectId(user_id)})
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        return {
+            "name": user["name"],
+            "address": user["address"],
+            "email": user["email"],
+            "phone": user["phone"],
+            "bounding_box": user["bounding_box"]
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+
+
+
+
+
