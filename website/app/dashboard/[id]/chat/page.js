@@ -1,5 +1,6 @@
 "use client"
 import { useState, useEffect, useRef } from "react";
+import axios from 'axios';
 import { useParams } from "next/navigation";
 import { Sparkles, RefreshCcw, ImageIcon, Mic, Square } from "lucide-react";
 import ChatSidebar from "@/components/ChatSideBar";
@@ -23,7 +24,7 @@ const [activeChatId, setActiveChatId] = useState("1"); // Default or selected ch
   ]);
   const [input, setInput] = useState("");
   const [imagePreview, setImagePreview] = useState(null);
-  const [context, setContext]=useState("context");
+  const [context, setContext]=useState(null);
   const [isRecording, setIsRecording] = useState(false);
   const [mediaRecorder, setMediaRecorder] = useState(null);
   const [audioBlob, setAudioBlob] = useState(null);
@@ -42,14 +43,35 @@ const [activeChatId, setActiveChatId] = useState("1"); // Default or selected ch
     setMessages((prev) => [...prev, botMessage]);
   };
 
-  const handleNewChat = () => {
-    setMessages([
-      { type: "bot", text: "Hi, Annapoorna here! How may I help you?" },
-    ]);
-    setImagePreview(null);
-    setInput("");
-    clearChat();
-  };
+
+  const handleNewChat = async () => {
+  // Step 1: Reset chat UI first
+  setMessages([
+    { type: "bot", text: "Hi, Annapoorna here! How may I help you?" },
+  ]);
+  setImagePreview(null);
+  setInput("");
+  // Step 2: Only fetch report if `id` is present
+  if (!id) return;
+
+  try {
+    const response = await axios.get(`http://localhost:8000/latestReport/${id}`);
+
+    if (response.data && response.data.report) {
+      // Step 3: Set context based on fetched report
+      setContext(response.data.report);
+    } else {
+      setContext('');
+    }
+  } catch (err) {
+    console.error("Error fetching report:", err);
+    setError("Failed to fetch report");
+    setContext('');
+  }
+
+  clearChat(); // Clear memory on backend
+};
+
 
   const handleImageChange = async (e) => {
   const file = e.target.files[0];
@@ -71,6 +93,7 @@ const [activeChatId, setActiveChatId] = useState("1"); // Default or selected ch
     }
   }
 };
+
 
 
   async function generateResponse(userInput) {

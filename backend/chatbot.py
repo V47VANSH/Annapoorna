@@ -1,5 +1,7 @@
 from langchain.chains import ConversationChain
 from langchain_openai.chat_models import ChatOpenAI
+from langchain.memory import ConversationBufferMemory
+from langchain.schema import SystemMessage
 
 llm = ChatOpenAI(
     model="unsloth-llama-3-2-3b-instruct",
@@ -18,8 +20,13 @@ llm = ChatOpenAI(
 # from langchain_ollama import ChatOllama
 
 # llm = ChatOllama(model="deepseek-r1:1.5b")
+# Initial memory
+memory = ConversationBufferMemory()
+
+# Global conversation chain
 conversation = ConversationChain(
     llm=llm,
+    memory=memory
 )
 
 def returnResponse(user_input: str) -> str:
@@ -57,3 +64,28 @@ Make the output concise but informative, use markdown formatting with headings o
 
     response = conversation.predict(input=prompt)
     return response
+
+
+def addContext(report: str):
+    """
+    Reinitializes the conversation with report as context and sets the system prompt.
+    """
+    global conversation, memory
+    conversation.memory.clear()
+    
+    # System message to set behavior
+    system_prompt = (
+        "You are a highly knowledgeable and helpful expert in plant pathology and crop health. "
+        "Your job is to analyze and advise farmers about their crops based on the following report. "
+        "Be clear, helpful, and specific.\n\n"
+        "It is advised to explain problem in an easy way as the farmer you are answering to might be a little uneducated. Be more solution oriented, avoid tricky terms."
+        f"Report:\n{report}"
+    )
+    # Add system message to memory
+    memory.chat_memory.add_message(SystemMessage(content=system_prompt))
+    
+    # Reinitialize conversation with new memory and system context
+    conversation = ConversationChain(
+        llm=llm,
+        memory=memory
+    )
