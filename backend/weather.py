@@ -1,43 +1,49 @@
 import requests
+from typing import Dict, Union
 
-# --- API KEYS ---
-
+# --- CONSTANTS ---
 TOMORROW_API_KEY = "REDACTED-TOMORROW-IO-KEY"
+TOMORROW_API_URL = "https://api.tomorrow.io/v4/weather/realtime"
 
-def fetch_tomorrow_io(lat, lon):
+# --- FETCH FUNCTION ---
+def fetch_tomorrow_io(lat: float, lon: float) -> Dict[str, Union[str, float]]:
     try:
-        url = f"https://api.tomorrow.io/v4/weather/realtime?location={lat},{lon}&apikey={TOMORROW_API_KEY}"
-        response = requests.get(url)
-        response.raise_for_status()
-        data = response.json().get("data", {}).get("values", {})
-        return {
-            "temperature": data.get("temperature", "N/A"),
-            "humidity": data.get("humidity", "N/A"),
-            "rain_probability": data.get("precipitationProbability", "N/A"),
-            "soil_moisture": data.get("soilMoistureVolumetric0To10cm", "N/A"),
-            "evapotranspiration": data.get("evapotranspiration", "N/A")
+        params = {
+            "location": f"{lat},{lon}",
+            "apikey": TOMORROW_API_KEY
         }
+        response = requests.get(TOMORROW_API_URL, params=params)
+        response.raise_for_status()
+        values = response.json().get("data", {}).get("values", {})
+
+        return {
+            "temperature": values.get("temperature", "N/A"),
+            "humidity": values.get("humidity", "N/A"),
+            "rain_probability": values.get("precipitationProbability", "N/A"),
+            "soil_moisture": values.get("soilMoistureVolumetric0To10cm", "N/A"),
+            "evapotranspiration": values.get("evapotranspiration", "N/A")
+        }
+
     except Exception as e:
         return {"error": f"Tomorrow.io error: {str(e)}"}
 
-# --- MAIN FUNCTION (Agent-friendly) ---
-def get_weather_info(lat, lon) -> str:
+# --- MAIN REPORT FUNCTION ---
+def get_weather_info(lat: float, lon: float) -> str:
     tomorrow = fetch_tomorrow_io(lat, lon)
 
-    report = f"\nCombined Weather Insights for the field location are following:\n"
+    report_lines = ["\nCombined Weather Insights for the field location are following:\n"]
 
     if "error" not in tomorrow:
-        report += f"""
-🛰️ Tomorrow.io:
-- Temp: {tomorrow['temperature']}°C
-- Humidity: {tomorrow['humidity']}%
-- Rain Probability: {tomorrow['rain_probability']}%
-{"- Soil Moisture: "+tomorrow['soil_moisture']+" m³/m³" if tomorrow['soil_moisture']!="N/A" else ""}
-{"- Evapotranspiration: "+tomorrow['evapotranspiration']+" mm/day" if tomorrow['evapotranspiration']!="N/A" else ""}"""
+        report_lines.append("🛰️ Tomorrow.io:")
+        report_lines.append(f"- Temp: {tomorrow['temperature']}°C")
+        report_lines.append(f"- Humidity: {tomorrow['humidity']}%")
+        report_lines.append(f"- Rain Probability: {tomorrow['rain_probability']}%")
+        if tomorrow['soil_moisture'] != "N/A":
+            report_lines.append(f"- Soil Moisture: {tomorrow['soil_moisture']} m³/m³")
+        if tomorrow['evapotranspiration'] != "N/A":
+            report_lines.append(f"- Evapotranspiration: {tomorrow['evapotranspiration']} mm/day")
 
-    # Add any API errors
-    for api_response in [tomorrow]:
-        if "error" in api_response:
-            report += f"\n\n⚠️ {api_response['error']}"
+    if "error" in tomorrow:
+        report_lines.append(f"\n⚠️ {tomorrow['error']}")
 
-    return report
+    return "\n".join(report_lines)
