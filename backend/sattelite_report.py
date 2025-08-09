@@ -1,25 +1,85 @@
+"""Crop health report from satellite data (Google Earth Engine).
+
+Uses the latest Sentinel-2, Landsat 8, Sentinel-1 and MODIS images from the
+last 90 days, computes vegetation/water/nitrogen indices, clusters stressed
+pixels with DBSCAN and writes a markdown report.
+"""
+
+import logging
+import threading
+from datetime import UTC, datetime, timedelta
+
 import ee
-from datetime import datetime, timedelta, timezone
-import json
+import numpy as np
+from sklearn.cluster import DBSCAN
 
-# Initialize Earth Engine (run ee.Authenticate() interactively if needed)
-# try:
-#     ee.Initialize()
-# except Exception:
-#     ee.Authenticate()
-#     ee.Initialize()
-from dotenv import load_dotenv  # added to load env variables
-import os                       # added for env var support
-load_dotenv(dotenv_path=".env.local")  # load env variables
+import config
 
-PROJECT_ID = os.environ.get("PROJECT_ID") 
+logger = logging.getLogger(__name__)
+
+_ee_initialized = False
+_ee_lock = threading.Lock()
 
 
+class EarthEngineUnavailable(RuntimeError):
+    """Raised when Earth Engine is not configured or not authenticated."""
 
 
-# Initialize GEE
-# ee.Authenticate()
-ee.Initialize(project=PROJECT_ID)
+def ensure_earth_engine() -> None:
+    """Initialize Earth Engine on first use.
+
+    Credentials: GEE_SERVICE_ACCOUNT_KEY if set, otherwise the login saved by
+    `earthengine authenticate`, otherwise application default credentials.
+    """
+    global _ee_initialized
+    if _ee_initialized:
+        return
+
+    if config.OFFLINE_MODE:
+        raise EarthEngineUnavailable(
+            "OFFLINE_MODE is enabled; Earth Engine is disabled."
+        )
+    if not config.GEE_PROJECT_ID:
+        raise EarthEngineUnavailable(
+            "PROJECT_ID is not set. Create a Google Cloud project registered for "
+            "Earth Engine and set PROJECT_ID in backend/.env (see the README)."
+        )
+
+    with _ee_lock:
+        if _ee_initialized:
+            return
+
+        credentials = "persistent"  # the library's own default
+        if config.GEE_SERVICE_ACCOUNT_KEY:
+            try:
+                credentials = ee.ServiceAccountCredentials(
+                    None, key_file=config.GEE_SERVICE_ACCOUNT_KEY
+                )
+            except Exception as exc:
+                raise EarthEngineUnavailable(
+                    "Could not load the service account key at "
+                    f"GEE_SERVICE_ACCOUNT_KEY: {exc}"
+                ) from exc
+
+        try:
+            ee.Initialize(credentials, project=config.GEE_PROJECT_ID)
+        except Exception as exc:
+            hint = (
+                "Check that the service account is registered for Earth Engine "
+                "and has the Earth Engine Resource Viewer role."
+                if config.GEE_SERVICE_ACCOUNT_KEY
+                else "Run 'uv run earthengine authenticate' in backend/ once."
+            )
+            raise EarthEngineUnavailable(
+                f"Earth Engine initialization failed: {exc}. {hint}"
+            ) from exc
+
+        _ee_initialized = True
+        logger.info(
+            "Earth Engine initialized for project %s (%s)",
+            config.GEE_PROJECT_ID,
+            "service account" if config.GEE_SERVICE_ACCOUNT_KEY else "user login",
+        )
 
 
 # Thresholds for parameter interpretation
@@ -85,6 +145,11 @@ THRESHOLDS = {
 
 
 
+def _fmt(value, digits=2):
+    """Format a statistic, tolerating bands that returned no data."""
+    return "n/a" if value is None else f"{value:.{digits}f}"
+
+
 def generate_deep_interpretation(
     s2_stats, l8_stats, s1_stats, modis_stats, modis_lai_stats, modis_temp_stats, prev_stats=None
 ):
@@ -97,22 +162,20 @@ def generate_deep_interpretation(
         ndwi = s2_stats.get('NDWI', {}).get('mean')
         ndre = s2_stats.get('NDRE', {}).get('mean')
         savi = s2_stats.get('SAVI', {}).get('mean')
-        msavi = s2_stats.get('MSAVI', {}).get('mean')
-        vari = s2_stats.get('VARI', {}).get('mean')
         status = []
 
         # Combined logic with explicit values
         if ndvi is not None and ndvi < 0.2 and ndwi is not None and ndwi < 0:
             status.append(
-                f"Very low vegetation (NDVI={ndvi:.2f}) and active water stress (NDWI={ndwi:.2f}) — likely bare, failed emergence, or severe drought."
+                f"Very low vegetation (NDVI={ndvi:.2f}) and active water stress (NDWI={ndwi:.2f}) - likely bare, failed emergence, or severe drought."
             )
         elif (ndvi and 0.2 <= ndvi < 0.4) and (ndwi and ndwi < 0.1) and (evi and evi < 0.3):
             status.append(
-                f"Crop is struggling: thin canopy (EVI={evi:.2f}), low NDVI ({ndvi:.2f}), dry soil (NDWI={ndwi:.2f}) — could be drought onset, pests, or early stress."
+                f"Crop is struggling: thin canopy (EVI={evi:.2f}), low NDVI ({ndvi:.2f}), dry soil (NDWI={ndwi:.2f}) - could be drought onset, pests, or early stress."
             )
         elif (ndvi and 0.4 <= ndvi < 0.6) and (ndwi and ndwi > 0.2):
             status.append(
-                f"Healthy, steadily growing crop with good water (NDVI={ndvi:.2f}, NDWI={ndwi:.2f}) — maintain regimen."
+                f"Healthy, steadily growing crop with good water (NDVI={ndvi:.2f}, NDWI={ndwi:.2f}) - maintain regimen."
             )
         elif (ndvi and ndvi > 0.6) and (evi and evi > 0.5) and (ndwi and ndwi > 0.15):
             status.append(
@@ -120,7 +183,7 @@ def generate_deep_interpretation(
             )
         else:
             status.append(
-                f"Mixed crop condition: NDVI={ndvi}, EVI={evi}, NDWI={ndwi}. Combined indices do not strongly indicate a healthy or a severely stressed field."
+                f"Mixed crop condition: NDVI={_fmt(ndvi)}, EVI={_fmt(evi)}, NDWI={_fmt(ndwi)}. Combined indices do not strongly indicate a healthy or a severely stressed field."
             )
 
         if ndre is not None:
@@ -140,7 +203,7 @@ def generate_deep_interpretation(
         # Variability and spatial advice
         if ndvi_std and ndvi_std > 0.12:
             status.append(
-                f"Significant spatial variability present (NDVI stdDev={ndvi_std:.2f}) — patchy emergence or management differences, apply zone-based treatment."
+                f"Significant spatial variability present (NDVI stdDev={ndvi_std:.2f}) - patchy emergence or management differences, apply zone-based treatment."
             )
 
         if savi is not None and savi < 0.3:
@@ -167,11 +230,11 @@ def generate_deep_interpretation(
                 temp_status = f"Normal field temperature {temp:.2f}°C."
         if ndvi is not None and ndvi < 0.15 and ndwi is not None and ndwi < 0.12:
             ls_status.append(
-                f"Extremely low NDVI ({ndvi:.2f}) and low NDWI ({ndwi:.2f}) — bare soil or failed stand, perhaps recently harvested."
+                f"Extremely low NDVI ({ndvi:.2f}) and low NDWI ({ndwi:.2f}) - bare soil or failed stand, perhaps recently harvested."
             )
         elif ndvi is not None and ndvi < 0.3:
             ls_status.append(
-                f"Sparse vegetative cover (NDVI={ndvi:.2f}) — underperforming, yield limited."
+                f"Sparse vegetative cover (NDVI={ndvi:.2f}) - underperforming, yield limited."
             )
         if evi is not None and evi < 0.2:
             ls_status.append(
@@ -229,119 +292,6 @@ def generate_deep_interpretation(
 
 
 
-# def generate_deep_interpretation(s2_stats, l8_stats, s1_stats, modis_stats, modis_lai_stats, modis_temp_stats, prev_stats=None):
-#     interpretation = []
-    
-#     # --- Sentinel-2 (High-res) ---
-#     if s2_stats:
-#         ndvi = s2_stats.get('NDVI', {}).get('mean')
-#         evi = s2_stats.get('EVI', {}).get('mean')
-#         ndwi = s2_stats.get('NDWI', {}).get('mean')
-#         ndre = s2_stats.get('NDRE', {}).get('mean')
-#         savi = s2_stats.get('SAVI', {}).get('mean')
-#         msavi = s2_stats.get('MSAVI', {}).get('mean')
-#         vari = s2_stats.get('VARI', {}).get('mean')
-#         ndvi_std = s2_stats.get('NDVI', {}).get('stdDev', 0)
-#         evi_std = s2_stats.get('EVI', {}).get('stdDev', 0)
-#         status = []
-        
-#         # Combined crop vigor and drought logic
-#         if ndvi is not None and ndvi < 0.2 and ndwi is not None and ndwi < 0:
-#             status.append("Very low vegetation and active water stress: likely bare, failed emergence, or severe drought.")
-#         elif ndvi and 0.2 <= ndvi < 0.4 and ndwi and ndwi < 0.1 and evi and evi < 0.3:
-#             status.append("Crop is struggling: thin canopy, dry soil—could be drought onset, pests, or early growth stress.")
-#         elif ndvi and 0.4 <= ndvi < 0.6 and ndwi and ndwi > 0.2:
-#             status.append("Healthy, steadily growing crop with good water conditions.")
-#         elif ndvi and ndvi > 0.6 and evi and evi > 0.5 and ndwi and ndwi > 0.15:
-#             status.append("Crop field is at or near vegetative peak; monitor for lodging or disease if NDWI > 0.3.")
-#         else:
-#             status.append("Mixed vegetation vigor and moderate stress; patches might be performing, but whole-field yield could be limited.")
-
-#         if ndre is not None:
-#             if ndre < 0.13:
-#                 status.append("Nitrogen likely deficient or crop is in early growth phase.")
-#             elif ndre < 0.2:
-#                 status.append("Borderline/low nitrogen: consider split or foliar application.")
-#             elif ndre > 0.3:
-#                 status.append("Robust nitrogen uptake and strong chlorophyll content.")
-
-#         # Variability and spatial advice
-#         if ndvi_std and ndvi_std > 0.12:
-#             status.append("Strong intra-field NDVI variability: indicates patchy emergence or management differences. Apply zone-based treatments.")
-
-#         if savi is not None and savi < 0.3:
-#             status.append("Field is mostly bare; consider resowing or weed management.")
-
-#         interpretation.append("**Sentinel-2 Analysis:**\n- " + "\n- ".join(status))
-
-#     # --- Landsat 8 (Medium-res) ---
-#     if l8_stats:
-#         ndvi = l8_stats.get('NDVI', {}).get('mean')
-#         ndwi = l8_stats.get('NDWI', {}).get('mean')
-#         evi = l8_stats.get('EVI', {}).get('mean')
-#         temp = l8_stats.get('SurfaceTemp', {}).get('mean', None)
-#         temp_status = ""
-#         if temp is not None:
-#             if temp < 10:
-#                 temp_status = "Likely early day/acquisition or cold snap—no heat risk present."
-#             elif temp > 34:
-#                 temp_status = "High surface temp: risk of heat and drought stress."
-#             else:
-#                 temp_status = "Normal crop temperature range; no acute heat issue."
-#         ls_status = []
-#         if ndvi is not None and ndvi < 0.15 and ndwi is not None and ndwi < 0.12:
-#             ls_status.append("Very low vegetation and poor moisture: likely bare, stressed, or recently harvested.")
-#         elif ndvi is not None and ndvi < 0.3:
-#             ls_status.append("Underperforming crop, sparse vegetative cover—yields will be limited.")
-#         if evi is not None and evi < 0.2:
-#             ls_status.append("Canopy expansion is stunted.")
-#         interpretation.append("**Landsat 8 Analysis:**\n- " + "\n- ".join(ls_status + ([f"Surface temperature: {temp:.2f}°C. {temp_status}"] if temp else [])))
-
-#     # --- Sentinel-1 SAR Moisture/Structure ---
-#     if s1_stats and s1_stats.get('VV', {}).get('mean') is not None:
-#         vv = s1_stats['VV']['mean']
-#         vh = s1_stats.get('VH', {}).get('mean')
-#         sar_msg = []
-#         if vv is not None and vv > -10:
-#             sar_msg.append("SAR backscatter high: peak crop or persistent soil moisture.")
-#         elif vv is not None and vv < -15 and vh is not None and vh < -18:
-#             sar_msg.append("Very dry, bare, or recently tilled soil detected.")
-#         elif vv is not None and vh is not None:
-#             sar_msg.append("RADAR indicates intermediate coverage; may reflect regrowth or partial crop loss.")
-#         interpretation.append("**Sentinel-1 SAR:**\n- " + " / ".join(sar_msg))
-
-#     # --- MODIS NDVI/EVI/LAI, with scale factor fix ---
-#     if modis_stats:
-#         ndvi = modis_stats.get('NDVI', {}).get('mean')
-#         evi = modis_stats.get('EVI', {}).get('mean')
-#         if ndvi is not None and evi is not None:
-#             ndvi_c = ndvi * 0.0001 if ndvi > 1 else ndvi
-#             evi_c = evi * 0.0001 if evi > 1 else evi
-#             if ndvi_c < 0.3 and evi_c < 0.25:
-#                 interpretation.append("**MODIS NDVI/EVI**: Large-scale stress, with regional NDVI/EVI below crop growth benchmarks.")
-#             elif ndvi_c > 0.5 and evi_c > 0.3:
-#                 interpretation.append("**MODIS NDVI/EVI**: Field is comparatively healthy at landscape scale.")
-#     if modis_lai_stats:
-#         lai = modis_lai_stats.get('Lai_500m', {}).get('mean')
-#         if lai is not None:
-#             if lai < 2:
-#                 interpretation.append("**MODIS LAI**: Weak canopy; stands are sparse, significant stand loss possible.")
-#             elif 2 <= lai < 4:
-#                 interpretation.append("**MODIS LAI**: Target for healthy wheat/maize is 3–5; field is moderate, may be N or water limited.")
-#             else:
-#                 interpretation.append("**MODIS LAI**: Good leaf area; likely above-average yield if stress is short-term.")
-
-#     # --- Temporal change/trend integration (optional, if you store previous stats) ---
-#     # if prev_stats: (e.g., compare NDVI, NDWI, LAI for trend detection and alert on rapid drops)
-#     # You may also auto-detect yield scenarios, heat/drought impact, etc.
-
-#     return "\n\n".join(interpretation)
-
-
-
-from sklearn.cluster import DBSCAN
-import numpy as np
-
 def generate_flagged_area_interpretation(flagged_areas, meta=None, cluster_eps=0.0005, min_samples=3):
     """
     - flagged_areas: list of dicts with coordinate, parameter, value, threshold_message per flagged pixel
@@ -352,47 +302,47 @@ def generate_flagged_area_interpretation(flagged_areas, meta=None, cluster_eps=0
     """
     if not flagged_areas or len(flagged_areas) == 0:
         return "No flagged areas detected. Field is within healthy thresholds as per the latest satellite pass."
-    
+
     coords = [area['coordinates'] for area in flagged_areas]
     if len(coords) < min_samples:
         return "Only isolated flagged pixels were found; no spatial clusters detected. These may be random anomalies or noise. No urgent action needed unless similar patterns persist over time."
-    
+
     coords_np = np.array(coords)
     # DBSCAN clustering (in degrees; for metric use projected coords)
     clustering = DBSCAN(eps=cluster_eps, min_samples=min_samples).fit(coords_np)
     labels = clustering.labels_
     n_clusters = len(set(labels)) - (1 if -1 in labels else 0)
-    clustered_flagged = []
     clusters = {}
     for idx, label in enumerate(labels):
-        if label == -1: continue  # ignore "noise"
+        if label == -1:
+            continue  # ignore "noise"
         clusters.setdefault(label, []).append(flagged_areas[idx])
-    
+
     # Compose results
     result = []
     if n_clusters == 0:
-        result.append("Flagged areas are scattered single points—no clustering detected. These are most likely isolated anomalies or natural field micro-variability.")
+        result.append("Flagged areas are scattered single points, no clustering detected. These are most likely isolated anomalies or natural field micro-variability.")
         return "\n".join(result)
-    
+
     result.append("## Flagged Area Agronomic Summary")
     result.append(f"Detected {n_clusters} clusters of flagged areas (min {min_samples} points each):")
-    
+
     # Cluster summary table with aggregated data
     cluster_table = "| Cluster # | Center Longitude | Center Latitude | Issue | Avg Value | Points Count |\n|-----------|------------------|-----------------|-------|-----------|--------------|"
-    
+
     for i, points in clusters.items():
         # Calculate center coordinates
         lons = [p['coordinates'][0] for p in points]
         lats = [p['coordinates'][1] for p in points]
         center_lon = sum(lons) / len(lons)
         center_lat = sum(lats) / len(lats)
-        
+
         # Group by parameter and calculate averages
         param_groups = {}
         for point in points:
             param = point['parameter']
             param_groups.setdefault(param, []).append(point)
-        
+
         # Create issue summary for this cluster
         issue_parts = []
         for param, param_points in param_groups.items():
@@ -400,17 +350,16 @@ def generate_flagged_area_interpretation(flagged_areas, meta=None, cluster_eps=0
             # Use the full threshold message instead of splitting
             threshold_msg = param_points[0]['threshold_message']
             issue_parts.append(f"{param}: {threshold_msg} (avg: {avg_val:.2f})")
-        
+
         issue_summary = "; ".join(issue_parts)
         total_points = len(points)
-        
+
         cluster_table += f"\n| {i+1} | {center_lon:.5f} | {center_lat:.5f} | {issue_summary} | - | {total_points} |"
-    
+
     result.append(cluster_table)
-    result.append("\n*Each coordinate marks the center of a detected stress cluster—scout these first.*\n")
-    
+    result.append("\n*Each coordinate marks the center of a detected stress cluster, scout these first.*\n")
+
     # Parameter/context diagnostics
-    all_params = [p['parameter'] for ps in clusters.values() for p in ps]
     ndvi_vals = [p['value'] for ps in clusters.values() for p in ps if p['parameter'] == "NDVI"]
     ndwi_vals = [p['value'] for ps in clusters.values() for p in ps if p['parameter'] == "NDWI"]
     ndre_vals = [p['value'] for ps in clusters.values() for p in ps if p['parameter'] == "NDRE"]
@@ -428,11 +377,10 @@ def generate_flagged_area_interpretation(flagged_areas, meta=None, cluster_eps=0
         if min_ndwi < 0.08:
             result.append(f"- NDWI in clusters < 0.1 (mean {mean_ndwi:.2f}, min {min_ndwi:.2f}): active drought or deficit irrigation risk.")
     if ndre_vals:
-        mean_ndre = np.mean(ndre_vals)
         min_ndre = np.min(ndre_vals)
         if min_ndre < 0.13:
             result.append(f"- Some clusters have NDRE < 0.13 (min {min_ndre:.2f}): possible nitrogen deficiency or delayed development.")
-    
+
     # Recommendations
     result.append("\n### Actionable Recommendations")
     result.append("- **Scout each cluster center coordinate first.** These are priority zones most likely to be at risk for yield loss, failed establishment, or urgent water/nutrient intervention.")
@@ -441,10 +389,10 @@ def generate_flagged_area_interpretation(flagged_areas, meta=None, cluster_eps=0
     if ndre_vals and min_ndre < 0.13:
         result.append("- **Nitrogen management:** Consider foliar/split N for clusters with flagged NDRE if crop stage allows.")
     result.append("- Log field observations and match with flagged clusters. Repeat mapping after management changes or next satellite pass to confirm recovery.")
-    
+
     if meta:
         result.append(f"\n_Observation Window: {meta.get('analysis_period',{})}, Source Dates: {meta.get('satellite_sources',{})}_")
-    
+
     return "\n".join(result)
 def interpret(param, value):
     thresholds = THRESHOLDS.get(param, [])
@@ -459,27 +407,35 @@ def interpret(param, value):
 
 
 def add_all_indices(image):
-    ndvi = image.normalizedDifference(['B8', 'B4']).rename('NDVI')
-    evi = image.expression(
+    """Add indices to a Sentinel-2 image.
+
+    S2 reflectance is stored x10000. EVI, SAVI and MSAVI need real reflectance
+    (0-1), so the bands are scaled first.
+    """
+    refl = image.select(['B2', 'B3', 'B4', 'B5', 'B8', 'B11']).divide(10000)
+    blue, green, red = refl.select('B2'), refl.select('B3'), refl.select('B4')
+    nir = refl.select('B8')
+
+    ndvi = refl.normalizedDifference(['B8', 'B4']).rename('NDVI')
+    evi = refl.expression(
         '2.5 * ((NIR - RED) / (NIR + 6 * RED - 7.5 * BLUE + 1))',
-        {'NIR': image.select('B8'), 'RED': image.select('B4'), 'BLUE': image.select('B2')}
+        {'NIR': nir, 'RED': red, 'BLUE': blue}
     ).rename('EVI')
-    ndwi = image.normalizedDifference(['B8', 'B11']).rename('NDWI')
-    savi = image.expression(
+    ndwi = refl.normalizedDifference(['B8', 'B11']).rename('NDWI')
+    savi = refl.expression(
         '((NIR - RED) * (1 + L)) / (NIR + RED + L)',
-        {'NIR': image.select('B8'), 'RED': image.select('B4'), 'L': 0.5}
+        {'NIR': nir, 'RED': red, 'L': 0.5}
     ).rename('SAVI')
-    msavi = image.expression(
+    msavi = refl.expression(
         '0.5 * (2 * NIR + 1 - sqrt((2 * NIR + 1)**2 - 8 * (NIR - RED)))',
-        {'NIR': image.select('B8').float(), 'RED': image.select('B4').float()}
+        {'NIR': nir, 'RED': red}
     ).rename('MSAVI')
-    ndre = image.normalizedDifference(['B8', 'B5']).rename('NDRE')
-    vari = image.expression(
-        '(GREEN - RED)/(GREEN + RED - BLUE)',
-        {'GREEN': image.select('B3'), 'RED': image.select('B4'), 'BLUE': image.select('B2')}
+    ndre = refl.normalizedDifference(['B8', 'B5']).rename('NDRE')
+    vari = refl.expression(
+        '(GREEN - RED) / (GREEN + RED - BLUE)',
+        {'GREEN': green, 'RED': red, 'BLUE': blue}
     ).rename('VARI')
-    image = image.addBands([ndvi, evi, ndwi, savi, msavi, ndre, vari])
-    return image
+    return image.addBands([ndvi, evi, ndwi, savi, msavi, ndre, vari])
 
 def add_sentinel1_sar_indices(image):
     if image:
@@ -490,6 +446,34 @@ def add_sentinel1_sar_indices(image):
         image = image.addBands([vh_vv_ratio, vh_vv_diff])
         return image
     return None
+
+def scale_modis_vegetation(image):
+    """MOD13Q1: NDVI and EVI are stored x 10000."""
+    return image.addBands(
+        image.select(['NDVI', 'EVI']).multiply(0.0001), None, True
+    )
+
+
+def scale_modis_lai(image):
+    """MOD15A2H: LAI x10, FPAR x100. Values above 100 are fill (water, urban, cloud)."""
+    lai = image.select('Lai_500m')
+    fpar = image.select('Fpar_500m')
+    return image.addBands(
+        [
+            lai.updateMask(lai.lte(100)).multiply(0.1),
+            fpar.updateMask(fpar.lte(100)).multiply(0.01),
+        ],
+        None,
+        True,
+    )
+
+
+def scale_modis_lst(image):
+    """MOD11A1: LST is Kelvin / 0.02. Returned in deg C."""
+    return image.addBands(
+        image.select('LST_Day_1km').multiply(0.02).subtract(273.15), None, True
+    )
+
 
 def fetch_closest_pixel(img, aoi, band, scale):
     """For MODIS/Landsat/small AOI, get pixel value of grid cell over center."""
@@ -508,7 +492,7 @@ def date_of_image(img):
             if img_info['properties'].get(key):
                 ts = img_info['properties'][key] / 1000
                 try:
-                    return datetime.fromtimestamp(ts, tz=timezone.utc).strftime('%Y-%m-%d')
+                    return datetime.fromtimestamp(ts, tz=UTC).strftime('%Y-%m-%d')
                 except Exception:
                     return datetime.utcfromtimestamp(ts).strftime('%Y-%m-%d')
     except Exception:
@@ -516,19 +500,24 @@ def date_of_image(img):
     return "Not available"
 
 def get_latest(collection_id, aoi, start, end, cloud_filter=None, bands=None, proc_func=None, scale=10):
-    """Enhanced function to get latest image with flexible statistics collection."""
+    """Latest image in the date range and its band stats.
+
+    Returns (None, "Not available", {}) if there is no image. first() doesn't
+    return None for an empty collection, so the size is checked.
+    """
     col = ee.ImageCollection(collection_id).filterBounds(aoi).filterDate(start, end)
     if cloud_filter:
         col = col.filter(cloud_filter)
-    img = col.sort('system:time_start', False).first()
-    if img and proc_func:
-        img = proc_func(img)
-    elif not img:
+    if col.size().getInfo() == 0:
         return None, "Not available", {}
-    
+
+    img = ee.Image(col.sort('system:time_start', False).first())
+    if proc_func:
+        img = proc_func(img)
+
     stats = {}
     date = date_of_image(img)
-    
+
     # For MODIS/Landsat on small polygons, use sample-at-center
     for band in bands or []:
         try:
@@ -537,7 +526,7 @@ def get_latest(collection_id, aoi, start, end, cloud_filter=None, bands=None, pr
                 stats[band] = {'mean': pixel}
         except Exception:
             pass
-    
+
     # For Sentinel-2/Sentinel-1, use region mean
     try:
         reducer = ee.Reducer.mean().combine(ee.Reducer.stdDev(), sharedInputs=True)
@@ -550,7 +539,7 @@ def get_latest(collection_id, aoi, start, end, cloud_filter=None, bands=None, pr
                 stats[k] = v
     except Exception:
         pass
-    
+
     return img, date, stats
 
 def add_indices_s2(image):
@@ -558,15 +547,22 @@ def add_indices_s2(image):
     return add_all_indices(image)
 
 def add_indices_l8(image):
-    """Add Landsat-8 specific indices."""
-    ndvi = image.normalizedDifference(['SR_B5', 'SR_B4']).rename('NDVI')
-    ndwi = image.normalizedDifference(['SR_B5', 'SR_B6']).rename('NDWI')
-    evi = image.expression(
+    """Add indices and surface temperature (deg C) to a Landsat 8 C2 L2 image.
+
+    Reflectance = DN * 0.0000275 - 0.2, temperature = DN * 0.00341802 + 149 (K).
+    """
+    sr = image.select(['SR_B2', 'SR_B4', 'SR_B5', 'SR_B6']).multiply(0.0000275).add(-0.2)
+    ndvi = sr.normalizedDifference(['SR_B5', 'SR_B4']).rename('NDVI')
+    ndwi = sr.normalizedDifference(['SR_B5', 'SR_B6']).rename('NDWI')
+    evi = sr.expression(
         '2.5 * ((NIR - RED) / (NIR + 6 * RED - 7.5 * BLUE + 1))',
-        {'NIR': image.select('SR_B5'), 'RED': image.select('SR_B4'), 'BLUE': image.select('SR_B2')}
+        {'NIR': sr.select('SR_B5'), 'RED': sr.select('SR_B4'), 'BLUE': sr.select('SR_B2')}
     ).rename('EVI')
-    temp = image.select('ST_B10').multiply(0.00341802).add(149.0).rename('SurfaceTemp')
-    return image.addBands([ndvi, ndwi, evi, temp])
+    temp_c = (
+        image.select('ST_B10').multiply(0.00341802).add(149.0).subtract(273.15)
+        .rename('SurfaceTemp')
+    )
+    return image.addBands([ndvi, ndwi, evi, temp_c])
 
 def add_sar_indices(image):
     """Add SAR indices (alias for existing function)."""
@@ -579,189 +575,85 @@ INDEX_BANDS = {
     'Sentinel-1': ['VV', 'VH', 'VH_VV_RATIO', 'VH_VV_DIFF']
 }
 
-def get_latest_image_and_date(collection_id, geometry, start_date, end_date, filter_dict, sort_field='system:time_start'):
-    col = ee.ImageCollection(collection_id).filterBounds(geometry).filterDate(start_date, end_date)
-    for f, v in filter_dict.items():
-        if isinstance(v, (int, float)):
-            col = col.filter(ee.Filter.lt(f, v))
-        elif isinstance(v, str):
-            col = col.filter(ee.Filter.eq(f, v))
-        else:
-            col = col.filter(v)
-    col = col.sort(sort_field, False)
-    img = col.first()
-    dt = "Not available"
-    if img:
-        img_info = img.getInfo()
-        timestamp_keys = ['system:time_start', 'system:time_end']
-        for key in timestamp_keys:
-            if img_info['properties'].get(key):
-                ts = img_info['properties'][key] / 1000
-                try:
-                    dt = datetime.fromtimestamp(ts, tz=timezone.utc).strftime('%Y-%m-%d')
-                except Exception:
-                    dt = datetime.utcfromtimestamp(ts).strftime('%Y-%m-%d')
-                break
-    return img, dt
-
-def get_latest_sentinel2_image(geometry, start_date, end_date):
-    img, dt = get_latest_image_and_date(
-        'COPERNICUS/S2_SR_HARMONIZED', geometry, start_date, end_date, {'CLOUDY_PIXEL_PERCENTAGE': 15}
-    )
-    return (add_all_indices(ee.Image(img)), dt) if img else (None, dt)
-
-def get_latest_sentinel1_image(geometry, start_date, end_date):
-    img, dt = get_latest_image_and_date(
-        'COPERNICUS/S1_GRD',
-        geometry,
-        start_date,
-        end_date,
-        filter_dict={'instrumentMode': 'IW'}
-    )
-    return (add_sentinel1_sar_indices(ee.Image(img)), dt) if img else (None, dt)
-
-def get_latest_landsat_image(geometry, start_date, end_date):
-    img, dt = get_latest_image_and_date(
-        'LANDSAT/LC08/C02/T1_L2', geometry, start_date, end_date, {'CLOUD_COVER': 15}
-    )
-    if img:
-        image = ee.Image(img)
-        ndvi = image.normalizedDifference(['SR_B5', 'SR_B4']).rename('NDVI')
-        ndwi = image.normalizedDifference(['SR_B5', 'SR_B6']).rename('NDWI')
-        evi = image.expression(
-            '2.5 * ((NIR - RED) / (NIR + 6 * RED - 7.5 * BLUE + 1))',
-            {'NIR': image.select('SR_B5'), 'RED': image.select('SR_B4'), 'BLUE': image.select('SR_B2')}
-        ).rename('EVI')
-        temp = image.select('ST_B10').multiply(0.00341802).add(149.0).rename('SurfaceTemp')
-        image = image.addBands([ndvi, ndwi, evi, temp])
-        return (image, dt)
-    return (None, dt)
-
-def get_latest_modis_img(geometry, start_date, end_date):
-    img, dt = get_latest_image_and_date(
-        'MODIS/061/MOD15A2H', geometry, start_date, end_date, {}
-    )
-    return (ee.Image(img), dt) if img else (None, dt)
-
-def get_image_statistics(image, geometry, scale=10):
-    if not image:
-        return {}
-    reducers = ee.Reducer.mean() \
-        .combine(ee.Reducer.stdDev(), sharedInputs=True) \
-        .combine(ee.Reducer.min(), sharedInputs=True) \
-        .combine(ee.Reducer.max(), sharedInputs=True)
-    stats = image.reduceRegion(reducer=reducers, geometry=geometry, scale=scale, maxPixels=1e9).getInfo()
-    results = {}
-    for key, value in stats.items():
-        band, stat = key.rsplit('_', 1)
-        if band not in results:
-            results[band] = {}
-        results[band][stat] = value
-    return results
-
 def generate_interpretation(s2_stats, l8_stats, s2_date, l8_date):
+    """Per-satellite index summary, one line per index."""
     llm_report = []
 
+    def _index_lines(stats, params):
+        lines = []
+        for param in params:
+            value = stats.get(param, {}).get('mean')
+            meaning = interpret(param, value) or "no reading"
+            lines.append(f"  - {param}: {_fmt(value)} ({meaning})")
+        return lines
+
     if s2_stats:
-        ndvi = s2_stats.get('NDVI', {}).get('mean')
-        ndwi = s2_stats.get('NDWI', {}).get('mean')
-        ndre = s2_stats.get('NDRE', {}).get('mean')
-        evi  = s2_stats.get('EVI', {}).get('mean')
-        savi = s2_stats.get('SAVI', {}).get('mean')
-        msavi = s2_stats.get('MSAVI', {}).get('mean')
-        vari = s2_stats.get('VARI', {}).get('mean')
-        s2text = (
-            f"As of {s2_date} (Sentinel-2):\n"
-            f"  - NDVI: {ndvi:.2f} ({interpret('NDVI', ndvi)})\n"
-            f"  - NDWI: {ndwi:.2f} ({interpret('NDWI', ndwi)})\n"
-            f"  - NDRE: {ndre:.2f} ({interpret('NDRE', ndre)})\n"
-            f"  - SAVI: {savi:.2f} ({interpret('SAVI', savi)})\n"
-            f"  - MSAVI: {msavi:.2f} ({interpret('MSAVI', msavi)})\n"
-            f"  - EVI: {evi:.2f} ({interpret('EVI', evi)})\n"
-            f"  - VARI: {vari:.2f} ({interpret('VARI', vari)})"
-        )
-        llm_report.append(s2text)
+        lines = [f"As of {s2_date} (Sentinel-2):"]
+        lines += _index_lines(s2_stats, ['NDVI', 'NDWI', 'NDRE', 'SAVI', 'MSAVI', 'EVI', 'VARI'])
+        llm_report.append("\n".join(lines))
     else:
-        llm_report.append(f"Sentinel-2: No valid image found in last 90 days.")
+        llm_report.append("Sentinel-2: No valid image found in last 90 days.")
 
     if l8_stats:
-        ndvi = l8_stats.get('NDVI', {}).get('mean')
-        ndwi = l8_stats.get('NDWI', {}).get('mean')
-        evi = l8_stats.get('EVI', {}).get('mean')
-        temp = l8_stats.get('SurfaceTemp', {}).get('mean', None)
-        temp_c = temp - 273.15 if temp is not None else None
-        text = (
-            f"As of {l8_date} (Landsat 8):\n"
-            f"  - NDVI: {ndvi:.2f} ({interpret('NDVI', ndvi)})\n"
-            f"  - NDWI: {ndwi:.2f} ({interpret('NDWI', ndwi)})\n"
-            f"  - EVI: {evi:.2f} ({interpret('EVI', evi)})"
-        )
+        lines = [f"As of {l8_date} (Landsat 8):"]
+        lines += _index_lines(l8_stats, ['NDVI', 'NDWI', 'EVI'])
+        temp_c = l8_stats.get('SurfaceTemp', {}).get('mean')  # already deg C
         if temp_c is not None:
             if temp_c < 18:
-                tmsg = "Cool soil/canopy 10ideal for crops"
+                tmsg = "Cool soil/canopy - ideal for crops"
             elif temp_c > 34:
                 tmsg = "High temperature - potential heat stress"
             else:
                 tmsg = "Normal temperature range"
-            text += (f"\n  - Surface Temperature: {temp_c:.2f}B0C ({tmsg})")
-        llm_report.append(text)
+            lines.append(f"  - Surface Temperature: {temp_c:.2f}°C ({tmsg})")
+        llm_report.append("\n".join(lines))
     else:
-        llm_report.append(f"Landsat 8: No valid image found in last 90 days.")
+        llm_report.append("Landsat 8: No valid image found in last 90 days.")
 
     return "\n\n".join(llm_report)
 
-def get_field_issue_flags(stats, bands, thresholds):
-    flags = []
-    for param, th in zip(bands, thresholds):
-        mean_val = stats.get(param, {}).get('mean', None)
-        if mean_val is not None:
-            if mean_val < th[1]:
-                flags.append({
-                    'parameter': param,
-                    'threshold_message': th[2],
-                    'mean_value': mean_val
-                })
-    return flags
+# getInfo() returns at most 5000 features
+MAX_FLAGGED_SAMPLES = 500
+
 
 def generate_flagged_areas(image, geometry, bands, thresholds, scale=10):
-    try:
-        flagged_pixels = []
-        message = "No flagged pixels found. Everything is within healthy thresholds."
-        if not image:
-            return flagged_pixels
+    """Pixels below each band's threshold, with coordinates. EE errors are raised."""
+    if image is None:
+        return []
 
-        for param, th in zip(bands, thresholds):
-            band_names = image.bandNames().getInfo()
-            if param not in band_names:
-                continue
-            threshold_val = th[1]
-            band_img = image.select(param)
-            mask = band_img.lt(threshold_val)
-            masked_img = band_img.updateMask(mask)
-            if not masked_img:
-                return flagged_pixels.append({"message": message})
-            samples = masked_img.sample(region=geometry, scale=scale, geometries=True).getInfo()
-            for feature in samples.get('features', []):
-                coords = feature['geometry']['coordinates']
-                props = feature['properties']
-                flagged_pixels.append({
-                    'message': "flagged aread detected",
-                    'parameter': param,
-                    'threshold_message': th[2],
-                    'value': props.get(param),
-                    'coordinates': coords
-                })
-        return flagged_pixels
-    except Exception as e:
-        print(f"Error generating flagged areas: {e}")
-        flagged_pixels = []
-        message = "No flagged pixels found. Everything is within healthy thresholds."
-        return flagged_pixels.append({"message": message})
-        
+    available = set(image.bandNames().getInfo())
+    flagged_pixels = []
+    for param, th in zip(bands, thresholds, strict=False):
+        if param not in available:
+            continue
+        band_img = image.select(param)
+        masked = band_img.updateMask(band_img.lt(th[1]))
+        samples = (
+            masked.sample(
+                region=geometry,
+                scale=scale,
+                numPixels=MAX_FLAGGED_SAMPLES,
+                seed=0,
+                geometries=True,
+            )
+            .limit(MAX_FLAGGED_SAMPLES)
+            .getInfo()
+        )
+        for feature in samples.get('features', []):
+            flagged_pixels.append({
+                'message': "flagged area detected",
+                'parameter': param,
+                'threshold_message': th[2],
+                'value': feature['properties'].get(param),
+                'coordinates': feature['geometry']['coordinates'],
+            })
+    return flagged_pixels
+
 
 def generate_multisatellite_report(geometry_geojson, user_login, utc_now):
+    ensure_earth_engine()
     geometry = ee.Geometry.Polygon(geometry_geojson)
-    dt_now = datetime.strptime(utc_now, '%Y-%m-%d %H:%M:%S').replace(tzinfo=timezone.utc)
+    dt_now = datetime.strptime(utc_now, '%Y-%m-%d %H:%M:%S').replace(tzinfo=UTC)
     dt_start = dt_now - timedelta(days=90)
     start_date_str = dt_start.strftime('%Y-%m-%d')
     end_date_str = dt_now.strftime('%Y-%m-%d')
@@ -773,47 +665,45 @@ def generate_multisatellite_report(geometry_geojson, user_login, utc_now):
         cloud_filter=ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 15),
         bands=INDEX_BANDS['Sentinel-2'], proc_func=add_indices_s2, scale=10
     )
-    # print(f"Sentinel-2 stats")
-    
+
     # ---- Landsat-8
     l8, l8_date, l8_stats = get_latest(
         'LANDSAT/LC08/C02/T1_L2', geometry, start_date_str, end_date_str,
         cloud_filter=ee.Filter.lt('CLOUD_COVER', 15),
         bands=INDEX_BANDS['Landsat-8'], proc_func=add_indices_l8, scale=30
     )
-    
+
     # ---- MODIS NDVI/EVI
     modis, modis_date, modis_stats = get_latest(
         'MODIS/061/MOD13Q1', geometry, start_date_str, end_date_str,
-        bands=['NDVI', 'EVI'], scale=500
+        bands=['NDVI', 'EVI'], proc_func=scale_modis_vegetation, scale=500
     )
-    
+
     # ---- MODIS LAI/FPAR
     modis_lai, modis_lai_date, modis_lai_stats = get_latest(
         'MODIS/061/MOD15A2H', geometry, start_date_str, end_date_str,
-        bands=['Lai_500m', 'Fpar_500m'], scale=500
+        bands=['Lai_500m', 'Fpar_500m'], proc_func=scale_modis_lai, scale=500
     )
-    
+
     # ---- MODIS Land Surface Temperature
     modis_temp, modis_temp_date, modis_temp_stats = get_latest(
         'MODIS/061/MOD11A1', geometry, start_date_str, end_date_str,
-        bands=['LST_Day_1km'], scale=1000
+        bands=['LST_Day_1km'], proc_func=scale_modis_lst, scale=1000
     )
-    
+
     # ---- Sentinel-1 SAR
     s1, s1_date, s1_stats = get_latest(
         'COPERNICUS/S1_GRD', geometry, start_date_str, end_date_str,
         cloud_filter=ee.Filter.eq('instrumentMode', 'IW'),
         bands=INDEX_BANDS['Sentinel-1'], proc_func=add_sar_indices, scale=10
     )
-    # print (f"Sentinel-1 stats")
 
     llm_text_report = f"""
 # Comprehensive Multi-Satellite Crop & Field Health Report
 
 **User:** {user_login}  
 **Analysis Date (UTC):** {utc_now}  
-**Analysis Period:** {start_date_str} – {end_date_str}
+**Analysis Period:** {start_date_str} to {end_date_str}
 
 ## Latest Image Acquisition Dates
 
@@ -833,48 +723,40 @@ def generate_multisatellite_report(geometry_geojson, user_login, utc_now):
     test2 = generate_deep_interpretation(s2_stats, l8_stats, s1_stats, modis_stats, modis_lai_stats, modis_temp_stats)
     llm_text_report += "\n" + test2 + "\n"
 
-    s2_flagged = get_field_issue_flags(s2_stats, ['NDVI', 'NDWI', 'NDRE'], [
-        (None, 0.2, "NDVI low: possible sparse or stressed vegetation"),
-        (None, 0.1, "NDWI low: likely dry/drought stress"),
-        (None, 0.1, "NDRE low: potential N deficiency"),
-    ])
-    l8_flagged = get_field_issue_flags(l8_stats, ['NDVI', 'NDWI'], [
-        (None, 0.2, "NDVI low: sparse or failed zones"),
-        (None, 0.1, "NDWI low: water deficit"),
-    ])
-
-    try:
-
-
-        flagged_areas = []
-        flagged_areas.extend(s2_flagged)
-        flagged_areas.extend(l8_flagged)
-
-        flagged_coords_vals = []
-        flagged_coords_vals.extend(generate_flagged_areas(s2, geometry, ['NDVI', 'NDWI', 'NDRE'], [
-            (None, 0.2, "NDVI low: possible sparse or stressed vegetation"),
-            (None, 0.1, "NDWI low: likely dry/drought stress"),
-            (None, 0.1, "NDRE low: potential N deficiency"),
-        ], scale=10)[:10])
-
-        if l8 is not None:
+    healthy_message = (
+        "No flagged pixels found. Everything is within healthy thresholds."
+    )
+    flagged_coords_vals = []
+    if s2 is None and l8 is None:
+        interpretation = (
+            "No recent cloud-free Sentinel-2 or Landsat image, so stressed "
+            "areas could not be mapped."
+        )
+    else:
+        try:
+            flagged_coords_vals.extend(generate_flagged_areas(s2, geometry, ['NDVI', 'NDWI', 'NDRE'], [
+                (None, 0.2, "NDVI low: possible sparse or stressed vegetation"),
+                (None, 0.1, "NDWI low: likely dry/drought stress"),
+                (None, 0.1, "NDRE low: potential N deficiency"),
+            ], scale=10)[:10])
             flagged_coords_vals.extend(generate_flagged_areas(l8, geometry, ['NDVI', 'NDWI'], [
                 (None, 0.2, "NDVI low: sparse or failed zones"),
                 (None, 0.1, "NDWI low: water deficit"),
             ], scale=30)[:10])
 
-        if (flagged_coords_vals[0].get("message") == "No flagged pixels found. Everything is within healthy thresholds."):
-            interpretation = flagged_coords_vals[0]["message"]
-        else:
-            interpretation = generate_flagged_area_interpretation(flagged_coords_vals)
-        # llm_text_report += "\n" + interpretation + "\n"
-    except Exception as e:
-        print(f"Error generating flagged areas: {e}")
-        # llm_text_report += "\nError generating flagged areas: " + str(e) + "\n"
-        interpretation = "No flagged areas found "
-        flagged_coords_vals = []
+            interpretation = (
+                generate_flagged_area_interpretation(flagged_coords_vals)
+                if flagged_coords_vals
+                else healthy_message
+            )
+        except Exception as exc:
+            logger.warning("Flagged-area mapping failed: %s", exc)
+            interpretation = (
+                "Pixel-level stress mapping could not be completed for this field."
+            )
+            flagged_coords_vals = []
     llm_text_report += "\n" + interpretation + "\n"
-    
+
 
     metadata = {
         'user': user_login,
@@ -889,8 +771,7 @@ def generate_multisatellite_report(geometry_geojson, user_login, utc_now):
             'MODIS LST': modis_temp_date
         }
     }
-    # interpretation = generate_flagged_area_interpretation(flagged_coords_vals)
-    
+
 
     raw_details = {
         'sentinel2': {'stats': s2_stats, 'date': s2_date},
@@ -903,22 +784,26 @@ def generate_multisatellite_report(geometry_geojson, user_login, utc_now):
 
     return [llm_text_report, raw_details, flagged_coords_vals, metadata]
 
-# ===== Example Usage =====
-# if __name__ == '__main__':
-#     user = 'YOUR_USER'
-#     utc_now = '2025-07-19 11:24:00'
-#     my_field =  [ [ 76.9707, 29.4292 ],  #// Southwest
-#   [ 76.9780, 29.4292 ], # // Southeast
-#   [ 76.9780, 29.4340 ], # // Northeast
-#   [ 76.9707, 29.4340 ], # // Northwest
-#   [ 76.9707, 29.4292 ]  # // Closing point
-# ]
-#     text_report, details, flagged, meta = generate_multisatellite_report(my_field, user, utc_now)
-#     print('--- LLM Text Report ---')
-#     print(text_report)
-    # print('\n--- Raw Details ---')
-    # print(json.dumps(details, indent=4))
-    # print('\n--- Flagged Areas Sample (max 10) ---')
-    # print(flagged[:10])
-    # print('\n--- Metadata ---')
-    # print(json.dumps(meta, indent=4))
+if __name__ == "__main__":
+    # Test run on the demo farm: uv run python sattelite_report.py
+    import sys
+
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
+
+    lat_min, lat_max, lon_min, lon_max = 30.85, 30.95, 75.80, 75.90
+    demo_field = [  # Earth Engine wants [lon, lat]
+        [lon_min, lat_min],
+        [lon_max, lat_min],
+        [lon_max, lat_max],
+        [lon_min, lat_max],
+    ]
+
+    try:
+        report, _details, _flagged, meta = generate_multisatellite_report(
+            demo_field, "smoke-test", datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
+        )
+    except EarthEngineUnavailable as exc:
+        sys.exit(f"Earth Engine is not ready: {exc}")
+
+    print(report)
+    print("\nLatest acquisitions:", meta["satellite_sources"])
