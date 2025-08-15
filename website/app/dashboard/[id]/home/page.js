@@ -39,7 +39,10 @@ export default function Home() {
                   <div className="ml-4">
                     <h3 className="text-lg font-medium text-gray-900">Annāpoorna says:</h3>
                     <div className="mt-2 text-gray-700">
-                      <p>Hello how are you</p>
+                      <p>
+                        Upload a photo of a leaf and I&apos;ll identify the disease,
+                        then walk you through treatment.
+                      </p>
                     </div>
                   </div>
                 </div>
@@ -65,12 +68,17 @@ export default function Home() {
                   <div className="flex-grow overflow-y-auto space-y-4 py-4">
                     <div className="flex justify-start">
                       <div className="bg-white rounded-2xl rounded-tl-none px-5 py-3 max-w-xs shadow-md border border-emerald-100">
-                        <p className="text-gray-700">Hello! I'm Annāpoorna, your farming assistant. How can I help today?</p>
+                        <p className="text-gray-700">
+                          Hello! I&apos;m Ann&#257;poorna, your farming assistant. How can I
+                          help today?
+                        </p>
                       </div>
                     </div>
                     <div className="flex justify-end">
                       <div className="bg-gradient-to-r from-emerald-500 to-lime-500 rounded-2xl rounded-tr-none px-5 py-3 max-w-xs shadow-md">
-                        <p className="text-white">Hello how are you</p>
+                        <p className="text-white">
+                          My wheat leaves have yellow streaks. What is wrong?
+                        </p>
                       </div>
                     </div>
                   </div>
