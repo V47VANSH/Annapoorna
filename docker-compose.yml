@@ -1,0 +1,62 @@
+# MongoDB + backend + frontend
+#   cp backend/.env.example backend/.env
+#   cp website/.env.example website/.env.local
+#   docker compose up --build
+# frontend: http://localhost:3000, api: http://localhost:8000
+
+services:
+  mongo:
+    image: mongo:7
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    env_file:
+      - ./backend/.env
+    environment:
+      MONGODB_URI: mongodb://mongo:27017
+      CORS_ALLOW_ORIGINS: http://localhost:3000,http://127.0.0.1:3000
+      # ollama running on the host machine
+      OLLAMA_BASE_URL: ${DOCKER_OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      # earth engine login from `earthengine authenticate`
+      - ${HOME:-~}/.config/earthengine:/home/appuser/.config/earthengine:ro
+      # or a service account key in backend/secrets/, then set
+      # GEE_SERVICE_ACCOUNT_KEY=/run/secrets/gee/<key>.json
+      - ./backend/secrets:/run/secrets/gee:ro
+      - whisper-cache:/home/appuser/.cache/whisper
+    depends_on:
+      mongo:
+        condition: service_healthy
+
+  website:
+    build:
+      context: ./website
+      args:
+        NEXT_PUBLIC_API_BASE_URL: http://localhost:8000
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    env_file:
+      - ./website/.env.local
+    depends_on:
+      - backend
+
+volumes:
+  mongo-data:
+  whisper-cache:
