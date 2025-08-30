@@ -1,5 +1,21 @@
 {
-    "accuracy": 0.7276,
-    "loss": 3.8182,
-    "timestamp": "2025-07-20T13:01:01.613051"
+  "model": "custom 4-block CNN (Conv-BN-MaxPool x4 + Dense 512)",
+  "dataset": "20k-multi-class-crop-disease-images",
+  "num_classes": 42,
+  "input_shape": [
+    224,
+    224,
+    3
+  ],
+  "train_images": 12255,
+  "validation_images": 3081,
+  "epochs": 25,
+  "optimizer": "Adam(learning_rate=1e-4)",
+  "loss_function": "categorical_crossentropy",
+  "final_train_accuracy": 0.7994,
+  "validation_accuracy": 0.7167,
+  "validation_loss": 4.0166,
+  "notes": "model.evaluate() on the validation split after epoch 25. val_accuracy varied between 0.53 and 0.73 over the last 7 epochs.",
+  "source_notebook": "notebooks/crop-disease-cnn-train.ipynb",
+  "timestamp": "2025-07-20T13:01:01.613051"
 }
