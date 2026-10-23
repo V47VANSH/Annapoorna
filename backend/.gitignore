@@ -8,3 +8,7 @@ temp_*
 
 # service account keys
 secrets/
+
+# model weights are published as a release asset, see download_model.py
+*.h5
+*.h5.part

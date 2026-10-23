@@ -19,6 +19,10 @@ WORKDIR /app
 COPY pyproject.toml uv.lock* ./
 RUN uv sync --extra ml --no-install-project --no-dev
 
+# the model is not in git; download it before COPY so code changes don't redo this
+COPY download_model.py ./
+RUN python download_model.py
+
 COPY . .
 
 RUN useradd --create-home --uid 1000 appuser && chown -R appuser:appuser /app

@@ -77,7 +77,7 @@ def _get_model():
     if not config.MODEL_PATH.exists():
         raise ModelUnavailable(
             f"Model weights not found at {config.MODEL_PATH}. "
-            "Run 'git lfs pull' to fetch them, or set MODEL_PATH."
+            "Run 'python download_model.py' to fetch them, or set MODEL_PATH."
         )
 
     with _lock:

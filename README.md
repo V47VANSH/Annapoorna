@@ -32,13 +32,14 @@ Google Earth Engine, APScheduler.
 ## Running it
 
 You need Python 3.11, Node.js 22, MongoDB, [ffmpeg](https://ffmpeg.org/download.html)
-(for Whisper) and [uv](https://docs.astral.sh/uv/). The model file is stored with
-Git LFS, so run `git lfs pull` after cloning.
+(for Whisper) and [uv](https://docs.astral.sh/uv/). The model file (~300MB) is not in git,
+so the clone stays small. Download it once with `python backend/download_model.py`.
 
 ```bash
 # backend
 cd backend
 cp .env.example .env
+python download_model.py    # fetches the disease model (~300MB)
 uv sync --extra ml          # --extra ml installs TensorFlow
 uv run uvicorn main:app --reload
 
@@ -193,8 +194,9 @@ All settings are in [backend/.env.example](backend/.env.example) and
 
 A CNN trained from scratch in
 [notebooks/crop-disease-cnn-train.ipynb](notebooks/crop-disease-cnn-train.ipynb).
-The trained model is [backend/crop_disease_cnn_model.h5](backend/crop_disease_cnn_model.h5)
-(Git LFS) and inference is in [backend/predict.py](backend/predict.py).
+The trained model is published as a
+[release asset](https://github.com/V47VANSH/Annapoorna/releases/tag/model-v1)
+(fetched by [backend/download_model.py](backend/download_model.py)) and inference is in [backend/predict.py](backend/predict.py).
 
 ```
 Conv2D(32)  + BatchNorm + MaxPool

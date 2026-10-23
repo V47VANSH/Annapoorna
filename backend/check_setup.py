@@ -46,13 +46,13 @@ def check_disease_model() -> None:
     import predict
 
     if not config.MODEL_PATH.exists():
-        report(FAIL, "Disease model", f"weights missing at {config.MODEL_PATH}; run 'git lfs pull'")
+        report(FAIL, "Disease model", f"weights missing at {config.MODEL_PATH}; run 'python download_model.py'")
         return
     if config.MODEL_PATH.stat().st_size < 1_000_000:
         report(
             FAIL,
             "Disease model",
-            "weights file is a Git LFS pointer, not the model; run 'git lfs pull'",
+            "weights file is incomplete; run 'python download_model.py --force'",
         )
         return
 
